@@ -3,6 +3,7 @@ package main
 import (
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -13,7 +14,13 @@ import (
 // describe.
 func buildBinary(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "carryon")
+	name := "carryon"
+	if runtime.GOOS == "windows" {
+		// os/exec needs the literal extension on Windows; it doesn't
+		// resolve one the way cmd.exe's PATH lookup does.
+		name += ".exe"
+	}
+	bin := filepath.Join(t.TempDir(), name)
 	out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput()
 	if err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
