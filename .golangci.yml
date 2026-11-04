@@ -1,0 +1,15 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - gosec
+  settings:
+    gosec:
+      excludes:
+        - G104 # errcheck already covers unchecked errors
+
+run:
+  timeout: 5m
