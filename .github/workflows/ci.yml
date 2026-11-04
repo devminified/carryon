@@ -50,7 +50,7 @@ jobs:
         with:
           version: latest
           args: build --snapshot --clean
-      - name: check binary size (NFR: under 25 MB per target)
+      - name: check binary size (under 25 MB per target, NFR-01)
         run: |
           find dist -type f \( -name 'carryon' -o -name 'carryon.exe' \) -print0 \
             | xargs -0 -I{} sh -c 'echo {}; test "$(stat -c%s "{}" 2>/dev/null || stat -f%z "{}")" -lt 26214400'
