@@ -14,7 +14,7 @@ Carryon doesn't have a single "add a module" recipe like a CRUD app — a ticket
 1. Write the SQL migration: tables, indexes, RLS policies (`using` **and** `with check`), triggers for the audit log.
 2. `supabase migration up`, then regenerate `database.types.ts`.
 3. Scaffold the function under `supabase/functions/{name}/` with a Zod input schema (see `edge-functions.md`).
-4. If it changes state another step depends on, write it through the outbox pattern rather than inline.
+4. If a later step depends on this one finishing, call it directly from this function or make it a scheduled (cron) Edge Function — see `edge-functions.md` for why there's no queue/outbox in the current build plan.
 5. Write a pgTAP test asserting a forbidden role gets zero rows, and a `deno test` for the function's own logic.
 
 ## A new web page / feature (`web/`)

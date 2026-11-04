@@ -7,31 +7,36 @@
 - Each migration enables RLS on every new table **in the same file** that creates it.
 - `supabase db lint` and a full apply-to-fresh-database run gate every PR (see `.claude/rules/testing.md`).
 
-## Tenant model
+## Schema (current build plan — CO-102)
 
-Every table carries `tenant_id` (the organization) as the **leading column** of its primary key and every index — this is cheap at today's scale and is what lets a tenant move to another database cell later without a query rewrite (Doc §"Multi-tenancy from day one"). The tenant ID is also a custom claim in the user's JWT, so RLS filters on it without a join.
-
-Core tables (see Doc §"Tables, keys and partitioning" for the full set and partitioning plan):
+A project **is** the tenant boundary here: there's no separate organization/`tenant_id` column. Access is scoped by `project_members` membership, checked via `has_role()` below. Six tables, exactly as CO-102 specifies (Doc §"Database recommendation"):
 
 | Table | Primary key | Notes |
 | --- | --- | --- |
 | `projects` | `id` | one row per registered repo; `git_remote` unique |
-| `project_members` | `(project_id, user_id)` | `role` is `viewer` / `resumer` / `admin`, mirrored from GitHub teams |
-| `sessions` | `(tenant_id, id)` | `id` is Claude Code's own `session_id` |
-| `session_chunks` | `(tenant_id, session_id, generation, seq)` | append-only; monthly range partition once volume justifies it |
-| `session_manifests` | `(tenant_id, session_id, generation)` | compacted chunk list for ended sessions |
-| `code_snapshots` | `(session_id, seq)` | `wip_ref` (hidden git ref) or `object_key` (bundle fallback) |
-| `leases` | `(tenant_id, session_id)` | enforces I7, one writer per session |
-| `audit_log` | `(tenant_id, id)` | append-only; RLS blocks `DELETE` for everyone but the DB owner |
-| `outbox` | `(id)` | short-lived; see `edge-functions.md` |
+| `project_members` | `(project_id, user_id)` | `role` is `viewer` / `resumer` / `admin`, mirrored from GitHub teams (CO-303) |
+| `sessions` | `id` | `id` is Claude Code's own `session_id`; `parent_session_id` set on a pulled fork |
+| `session_chunks` | `(session_id, seq)` | append-only, grows forever within a session |
+| `code_snapshots` | `(session_id, seq)` | `wip_ref` (hidden git ref) or `object_key` (bundle fallback, CO-202) |
+| `audit_log` | `id bigserial` | append-only; RLS blocks `DELETE` for everyone but the DB owner |
+
+Indexes (CO-102): `sessions(project_id, last_activity_at desc)`, `sessions(user_id)`, `session_chunks(session_id, seq)` (via the primary key).
+
+**Not part of the current build plan:** `tenant_id`, partitioning, `session_manifests`/compaction, `leases`, and `outbox` are all Doc §"Scaling to millions of users" (Tier 2/3) concerns — real, but deliberately out of scope until a ticket actually calls for them (CLAUDE.md: "No speculative scale"). Don't add a `tenant_id` column or a leading-key convention pre-emptively; if a future ticket introduces multi-org tenancy, it'll say so and this file gets updated then, not before.
 
 ## RLS policies
 
-Every table has RLS **enabled**. No exceptions. Every policy calls a single helper:
+Every table has RLS **enabled**. CO-102 ships every table with RLS on and **deny-all** (no policies yet — the anon/authenticated key gets zero rows everywhere). CO-302 is what adds the real per-role policies, built around one helper (exact signature per Doc §"Row-level security that stays fast"):
+
+`project_members.role` is a Postgres **enum**, not plain `text` — `viewer < resumer < admin` only holds under `>=` if declared in that order (`text` would sort `'admin' < 'resumer' < 'viewer'`, the opposite of what's intended):
+
+```sql
+create type project_role as enum ('viewer', 'resumer', 'admin'); -- order is significant
+```
 
 ```sql
 -- STABLE SECURITY DEFINER — evaluated once per statement, not once per row
-create or replace function has_role(p_tenant_id uuid, p_project_id uuid, p_min_role text)
+create or replace function has_role(p_project_id uuid, p_min_role project_role)
 returns boolean
 language sql
 security definer
@@ -42,7 +47,7 @@ as $$
     select 1 from project_members
     where project_id = p_project_id
       and user_id = auth.uid()
-      and role >= p_min_role  -- role ordering: viewer < resumer < admin
+      and role >= p_min_role
   );
 $$;
 ```
@@ -51,7 +56,7 @@ $$;
 -- resumer+ can pull a session's chunks; viewers can list but not pull
 create policy "resumer_can_read_chunks" on session_chunks
   for select to authenticated
-  using (has_role(tenant_id, (select project_id from sessions where id = session_id), 'resumer'));
+  using (has_role((select project_id from sessions where id = session_id), 'resumer'));
 ```
 
 - Every policy has a comment naming which row of the access table (Doc §"Who can do what" / `auth.md`) it implements.
@@ -64,10 +69,6 @@ Every policy is tested with pgTAP for every role and every table (NFR-08, CO-302
 ## Generated types
 
 Run `supabase gen types typescript --linked > web/src/shared/types/database.types.ts` after every migration. Never edit this file by hand.
-
-## Compaction
-
-When a session ends, a background job (queue: `compact`) writes one manifest object listing every chunk (byte range, SHA-256, chain head), optionally merges small chunk objects into larger ones, and replaces the session's `session_chunks` rows with one `session_manifests` row. Don't write a query that assumes chunk rows exist for an ended session — always check `sessions.status` and fall back to the manifest.
 
 ## Audit log
 

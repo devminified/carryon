@@ -28,23 +28,18 @@ Rules:
 2. **Run with the caller's JWT**, never the service-role key — except queue workers, which use a narrowly scoped role (Doc §"API hardening"). If a function seems to need the service key to "just work," that's a sign it belongs behind RLS instead.
 3. **Idempotent on `(session_id, seq)`** (or the equivalent key for the function) — a retried call must be a safe no-op, not a duplicate (I3). `register-chunk` and `confirm-chunk` in particular must tolerate at-least-once delivery.
 4. **Size and schema limits enforced**, not just typed — a Zod schema with no `.max()` on a string isn't enough on a public ingress function.
-5. **Rate limiting:** token bucket per user and per tenant (Doc §"API hardening"). Required before any function is reachable without a prior narrower check.
+5. **Rate limiting:** token bucket per user and per project (Doc §"API hardening"). Required before any function is reachable without a prior narrower check.
 6. **Structured logs only** — log the session ID and the step, never the chunk's content or a raw transcript line.
 7. **Response shape is stable** — same success/error envelope across functions.
 
-## The outbox pattern
+## How background work actually runs here
 
-`confirm-chunk` and `end-session` write an **outbox** row in the same transaction as their main change — this gives an atomic guarantee: if the chunk/session state exists, the follow-up job will run, with no "forgot to also queue the job" class of bug. A relay moves outbox rows onto queues; workers process them idempotently, at-least-once, with a 5-minute invisibility window and a dead-letter queue after 5 failures (alerting an admin).
+The current build plan has no queue or outbox — it's two patterns, both already named in specific tickets:
 
-| Queue | Work | Coalescing |
-| --- | --- | --- |
-| `summarize` | AI title/summary (incremental fold) | keyed by session — a newer event replaces a pending one |
-| `embed` | search vectors | keyed by session |
-| `rescan` | server-side secret scan of new chunks | none — every chunk scanned once |
-| `compact` | manifest + object compaction | keyed by session, ended sessions only |
-| `notify` | Slack messages | keyed by event |
+- **Triggered directly from the request handler that caused it.** `end-session` (CO-111) is what flips a session to `ended`; `summarize-session` (CO-407) is "triggered on `end-session`" — i.e. `end-session` invokes it, synchronously or fire-and-forget, not through an intermediate queue table.
+- **Scheduled (cron) Edge Functions** for periodic work: `sync-github-teams` runs every 15 minutes (CO-303), the secret rescan runs nightly (CO-306), live-session re-summarization runs every 30 minutes (CO-407). Supabase's `pg_cron` or a scheduled GitHub Action triggers these — there's no persistent job queue to feed.
 
-When adding a new background job: write it as a queue worker consuming an outbox-fed queue, not as logic inlined into the Edge Function's request handler. Request handlers stay fast; everything that can fail independently or take longer than a request timeout goes through the queue.
+**Not part of the current build plan:** an outbox table, a queue (pgmq or otherwise), and worker processes are Doc §"Asynchronous work" (Tier 1/2+ scaling), not anything a 52-ticket build-plan item asks for. If a ticket introduces real queueing (high enough chunk volume that a synchronous call from `confirm-chunk` becomes a bottleneck), build it then — don't pre-build the outbox plumbing now.
 
 ## `summarize-session` and the Anthropic API
 
