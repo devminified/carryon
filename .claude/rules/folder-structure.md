@@ -1,0 +1,87 @@
+# Folder Structure — Canonical
+
+```text
+carryon/
+├── CLAUDE.md
+├── README.md
+├── go.mod / go.sum
+├── .github/workflows/                  CI, release, nightly compat test
+│
+├── .claude/
+│   └── rules/                          detailed rules, imported by CLAUDE.md
+│
+├── cmd/
+│   └── carryon/
+│       └── main.go                     the one binary: wires cobra commands to internal/
+│
+├── internal/
+│   ├── hook/                           stdin JSON (session_id, transcript_path, cwd) → queue append
+│   ├── agent/                          daemon loop, debounce, scheduler (kardianos/service)
+│   ├── queue/                          append-only queue file and compaction
+│   ├── state/                          per-session pointer files (last uploaded byte offset)
+│   ├── reader/                         incremental JSONL reader
+│   ├── redact/                         gitleaks rules + path denylist + entropy scan
+│   ├── upload/                         zstd compress, signed-URL client, retries, chunking
+│   ├── snapshot/                       temp-index git snapshots, bundle fallback
+│   ├── pull/                           manifest fetch, download, verify, decompress, rewrite, place, launch
+│   ├── claudepath/                     ~/.claude path encoding per OS
+│   ├── project/                        git root and remote normalization, registry
+│   ├── api/                            Edge Function client (register-session, get-manifest, …)
+│   └── service/                        service install per OS (launchd / systemd / Windows Service)
+│
+├── supabase/
+│   ├── config.toml
+│   ├── migrations/                     SQL migrations, timestamp-prefixed, RLS in the same file as the table
+│   ├── seed.sql
+│   └── functions/                      Edge Functions (Deno/TypeScript)
+│       ├── register-session/
+│       ├── register-chunk/
+│       ├── confirm-chunk/
+│       ├── end-session/
+│       ├── get-manifest/
+│       ├── register-snapshot/
+│       ├── summarize-session/
+│       ├── rescan/
+│       ├── sync-github-teams/
+│       └── _shared/                    schema validation, has_role helper, Resend/Slack clients
+│
+├── web/                                Next.js app
+│   ├── next.config.ts
+│   ├── tailwind config, components.json, eslint config, etc. — directory defaults apply
+│   └── src/
+│       ├── app/                        routes — THIN, no business logic
+│       │   ├── (auth)/login/page.tsx
+│       │   ├── (dashboard)/
+│       │   │   ├── layout.tsx          auth-gated shell
+│       │   │   ├── projects/page.tsx
+│       │   │   ├── sessions/page.tsx
+│       │   │   ├── sessions/[id]/page.tsx
+│       │   │   └── admin/page.tsx
+│       │   └── api/                    only when Server Actions genuinely don't fit
+│       ├── modules/                    vertical slices, one per domain
+│       │   ├── sessions/
+│       │   │   ├── types.ts, schemas.ts
+│       │   │   ├── data/{queries,mutations,actions,keys}.ts
+│       │   │   ├── hooks/
+│       │   │   └── ui/
+│       │   ├── projects/
+│       │   └── admin/
+│       ├── shared/
+│       │   ├── constants/{roles.ts, routes.ts}
+│       │   ├── types/{database.types.ts, auth.ts, common.ts}  # database.types.ts is generated — DO NOT EDIT
+│       │   ├── lib/{supabase/{client,server,admin}.ts, format/, auth.ts, utils.ts}
+│       │   └── ui/                     reusable presentational components, shadcn generated code
+│       └── middleware.ts               auth refresh, route protection
+│
+└── test/
+    └── fixtures/                       sample sessions and repos, including the fake transcript writer used by CI e2e
+```
+
+## Rules About This Structure
+
+- **Never** put laptop-side logic in `web/`, or vice versa. They share a database and a protocol, not a process or a package.
+- **Never** create `web/src/components/` at the top level. Reusable UI lives in `web/src/shared/ui/`; module-specific UI lives in `web/src/modules/{module}/ui/`.
+- **Never** put business logic in `web/src/app/`. Pages render layouts and module UI components.
+- A `web/` module **may** import from `web/src/shared/`. A module **must not** import another module's internals.
+- Every new laptop-side pipeline stage gets its own `internal/{name}/` package, named for the stage, not the ticket.
+- Every new Edge Function gets its own directory under `supabase/functions/`, named for the RPC it implements, matching the names in Doc's architecture table.

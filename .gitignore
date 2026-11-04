@@ -1,0 +1,57 @@
+# --- Go (cmd/, internal/) ---
+/carryon
+/carryon-*
+*.exe
+*.exe~
+*.test
+*.out
+coverage.out
+coverage.html
+/dist/
+/bin/
+
+# --- Node / pnpm (web/) ---
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Next.js (web/) ---
+web/.next/
+web/out/
+web/build/
+*.tsbuildinfo
+next-env.d.ts
+
+# --- Supabase ---
+supabase/.branches/
+supabase/.temp/
+.supabase/
+
+# --- Env / secrets ---
+.env
+.env.*
+!.env.example
+!.env.local.example
+*.pem
+*.key
+
+# --- Carryon runtime state (never belongs in the repo) ---
+.carryon/
+*.carryon-cache
+
+# --- Test artifacts ---
+test/fixtures/qa-evidence/
+
+# --- Claude Code ---
+.claude/settings.local.json
+
+# --- Editor / OS ---
+.DS_Store
+.idea/
+*.swp
+
+# --- Release tooling ---
+*.sig
