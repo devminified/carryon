@@ -1,6 +1,5 @@
 # --- Go (cmd/, internal/) ---
 /carryon
-/carryon-*
 *.exe
 *.exe~
 *.test
