@@ -4,7 +4,7 @@ Capture every Claude Code session on a registered repo, upload it (redacted) to 
 
 See `Overview.md` for the product pitch and 52-ticket build plan, `Devminified Carryon — System Design Document (SDD).md` for the architecture and invariants, and `Carryon-TRD-Tickets.md` for the full ticket descriptions. `CLAUDE.md` and `.claude/rules/` are the binding engineering conventions for this repo.
 
-**Current status:** Phase 1 (`CO-101`) — the Go CLI scaffold only. Every subcommand below except `version` prints `not implemented` and exits `2`; they land in later tickets.
+**Current status:** Phase 1, through `CO-103`. `version`, `login`, and `logout` are implemented; everything else still prints `not implemented` and exits `2`.
 
 ## Quick start
 
@@ -17,13 +17,23 @@ go build -o carryon ./cmd/carryon
 
 Requires Go 1.23+.
 
+To use `login`/`logout` against local Supabase, create `~/.carryon/config.toml`:
+
+```toml
+api_url  = "http://127.0.0.1:54421"   # or a real project's URL
+anon_key = "sb_publishable_..."        # from `supabase status` or the project's API settings
+```
+
+`login` also needs a GitHub OAuth App configured — see `.claude/rules/auth.md` §"GitHub OAuth App setup" and `.env.example`.
+
 ## Commands
 
 | Command | Status | Ticket |
 | --- | --- | --- |
 | `carryon version` | implemented | CO-101 |
+| `carryon login` | implemented | CO-103 |
+| `carryon logout` | implemented | CO-103 |
 | `carryon install` | not implemented | CO-106 |
-| `carryon login` | not implemented | CO-103 |
 | `carryon hook` | not implemented | CO-105 |
 | `carryon agent` | not implemented | CO-107 |
 | `carryon status` | not implemented | CO-113 |
