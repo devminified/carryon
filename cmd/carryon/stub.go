@@ -19,10 +19,6 @@ func newInstallCmd() *cobra.Command {
 	return notImplementedCmd("install", "Install the Carryon hooks and background agent (CO-106)")
 }
 
-func newLoginCmd() *cobra.Command {
-	return notImplementedCmd("login", "Log in with the GitHub device flow (CO-103)")
-}
-
 func newHookCmd() *cobra.Command {
 	return notImplementedCmd("hook", "Record a Claude Code hook event to the local queue (CO-105)")
 }

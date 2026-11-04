@@ -7,11 +7,13 @@ import (
 )
 
 var allSubcommands = []string{
-	"version", "install", "login", "hook", "agent", "status", "ls", "pull", "export", "rename",
+	"version", "install", "login", "logout", "hook", "agent", "status", "ls", "pull", "export", "rename",
 }
 
+// login and logout are implemented (CO-103); everything else still
+// scaffolds the CLI surface for a later ticket.
 var stubSubcommands = []string{
-	"install", "login", "hook", "agent", "status", "ls", "pull", "export", "rename",
+	"install", "hook", "agent", "status", "ls", "pull", "export", "rename",
 }
 
 func TestRootCommandListsAllSubcommands(t *testing.T) {
