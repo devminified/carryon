@@ -10,6 +10,13 @@ linters:
     gosec:
       excludes:
         - G104 # errcheck already covers unchecked errors
+  exclusions:
+    rules:
+      # Test helpers that build and exec the binary under test, not
+      # attacker-controlled input — G204 is a false positive here.
+      - path: _test\.go
+        linters:
+          - gosec
 
 run:
   timeout: 5m
