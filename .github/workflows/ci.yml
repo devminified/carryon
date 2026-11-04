@@ -38,6 +38,20 @@ jobs:
       - name: go test -race
         run: go test -race ./...
 
+  supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.111.0
+      - name: start local stack (applies every migration to a fresh database)
+        run: supabase start
+      - name: db lint
+        run: supabase db lint
+      - name: migrations are idempotent on re-run (CO-102)
+        run: supabase db reset
+
   cross-compile:
     runs-on: ubuntu-latest
     needs: [lint, test]
