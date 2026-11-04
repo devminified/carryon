@@ -1,10 +1,10 @@
 # Notifications
 
-Carryon's primary notification channel is **Slack** (CO-409), not email — there's no payroll-style transactional email need. Supabase Auth's built-in email (magic link, if ever enabled) is the only auth-related email; everything else goes through the `notify` queue.
+Carryon's primary notification channel is **Slack** (CO-409), not email — there's no payroll-style transactional email need. Supabase Auth's built-in email (magic link, if ever enabled) is the only auth-related email; everything else is Slack, sent directly by the Edge Function that caused the event.
 
-## Slack — the `notify` queue
+## Slack (CO-409)
 
-`confirm-chunk`/`end-session`/`summarize-session` write an outbox row; the `notify` queue worker posts to Slack (title + link to the web viewer) when a session ends with a fresh AI summary, or when an admin deletes a session with an audit reason. Coalesced by event, so a flurry of chunk confirmations doesn't spam Slack — only the terminal event (session end) triggers a message. See `.claude/rules/edge-functions.md` for the outbox pattern.
+Per Doc: `summarize-session` (CO-407) calls the Slack webhook directly when a session it just summarized has outcome `blocked`, naming the session and linking to the web viewer. Coalesced naturally — only the terminal summarize call for a session triggers a message, not every chunk confirmation. Other message types (daily digest, opt-in; secret-rescan hits from CO-306 to admins) are likewise sent directly by the function that produces them. See `.claude/rules/edge-functions.md` for why there's no queue/outbox here in the current build plan.
 
 ```ts
 // supabase/functions/_shared/slack.ts
