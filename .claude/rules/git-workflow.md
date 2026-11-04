@@ -18,6 +18,12 @@ This codebase captures developers' full Claude Code sessions — code, prompts, 
 5. PR body: ticket reference (`Closes CO-107`), summary, migration list if any, manual test plan.
 6. After merge, delete the branch.
 
+## Enforcement
+
+`carryon` is public, so (unlike `hr-system`'s private-repo Team-plan gap) GitHub branch protection on `main` is live, not just discipline: PR required, required status checks (`lint`, `test (ubuntu-latest)`, `test (macos-latest)`, `test (windows-latest)`, `cross-compile`), enforced for admins too, linear history, no force-push, no deletion. A direct push to `main` is rejected by GitHub itself, not just by convention.
+
+**Bootstrap exception:** `CO-101`'s scaffold (the first five commits) was pushed directly to `main` before this protection existed, while bootstrapping the repo itself. From `CO-102` onward, every ticket goes through the branch-per-ticket flow below — no more exceptions.
+
 ## Hard rules
 
 - **Never push directly to `main`.**
