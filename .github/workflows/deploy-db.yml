@@ -1,0 +1,42 @@
+name: deploy-db
+
+# Applies supabase/migrations/ to a real Supabase project, automatically,
+# on every merge to main that touches a migration. This is the *only*
+# sanctioned way a migration reaches staging or production — never by
+# running `supabase db push` by hand from a dev machine. By the time this
+# workflow fires, the `supabase` job in ci.yml has already proven the same
+# migration applies cleanly to a fresh local database (required status
+# check on main), so cloud deploy is always preceded by a local pass.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/migrations/**"
+  workflow_dispatch: {} # manual trigger, for verifying the pipeline itself (e.g. after rotating secrets)
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.111.0
+      - name: link to carryon-staging
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      - name: push migrations
+        run: supabase db push --linked --yes
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+  # No deploy-production job yet, deliberately — carryon-prod stays
+  # unlinked/unpushed until a ticket actually needs it (issue #59).
