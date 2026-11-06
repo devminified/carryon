@@ -97,6 +97,11 @@ func New(cfg Config) (*Uploader, error) {
 // SessionEnd event), Upload calls end-session (CO-111) once every stream
 // has uploaded successfully — never before, so a session is only marked
 // ended once its last bytes are actually confirmed durable.
+//
+// Every returned error is run through agent.ClassifyError (CO-112)
+// before it reaches the caller, so Agent's retry/backoff policy sees a
+// consistent fatal-vs-retryable split regardless of which call inside
+// Upload actually failed.
 func (u *Uploader) Upload(ctx context.Context, session agent.Session) error {
 	if session.ProjectID == "" {
 		return fmt.Errorf("upload: session %s has no ProjectID — must be called through filter.Filter", session.ID)
@@ -105,7 +110,7 @@ func (u *Uploader) Upload(ctx context.Context, session agent.Session) error {
 	meta := gatherMetadata(ctx, session.Cwd)
 
 	if err := u.uploadStream(ctx, session, mainStreamID, session.ID, session.TranscriptPath, meta); err != nil {
-		return fmt.Errorf("uploading main transcript: %w", err)
+		return agent.ClassifyError(fmt.Errorf("uploading main transcript: %w", err))
 	}
 
 	subagents, err := reader.Subagents(session.TranscriptPath)
@@ -115,21 +120,21 @@ func (u *Uploader) Upload(ctx context.Context, session agent.Session) error {
 	for _, sa := range subagents {
 		stateKey := state.SubagentKey(session.ID, sa.AgentID)
 		if err := u.uploadStream(ctx, session, sa.AgentID, stateKey, sa.Path, meta); err != nil {
-			return fmt.Errorf("uploading subagent %s: %w", sa.AgentID, err)
+			return agent.ClassifyError(fmt.Errorf("uploading subagent %s: %w", sa.AgentID, err))
 		}
 	}
 
 	if session.Final {
 		token, err := u.tokenSource(ctx)
 		if err != nil {
-			return fmt.Errorf("getting access token for end-session: %w", err)
+			return agent.ClassifyError(fmt.Errorf("getting access token for end-session: %w", err))
 		}
 		client, err := u.clientSource()
 		if err != nil {
 			return fmt.Errorf("getting api client for end-session: %w", err)
 		}
 		if err := client.EndSession(ctx, token, session.ID); err != nil {
-			return fmt.Errorf("ending session: %w", err)
+			return agent.ClassifyError(fmt.Errorf("ending session: %w", err))
 		}
 	}
 	return nil

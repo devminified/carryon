@@ -5,15 +5,20 @@
 // compacts the queue file as it catches up.
 //
 // This package deliberately knows nothing about what an "upload" actually
-// does — that's the Uploader interface, implemented for real once CO-108
-// (project filter), CO-109 (incremental reader) and CO-110 (chunk upload
-// pipeline) land. Until then, cmd/carryon wires in a placeholder.
+// does — that's the Uploader interface, implemented for real by
+// internal/upload (wired behind internal/filter in cmd/carryon). What
+// Agent does own is CO-112's retry policy once Upload returns an error:
+// ClassifyError (classify.go) decides fatal vs retryable, backoffDelay
+// (backoff.go) computes the growing per-session delay for the retryable
+// case, and handleResult applies both.
 package agent
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -89,6 +94,10 @@ type Config struct {
 	// WorkerPoolSize bounds concurrent uploads. Default 2.
 	WorkerPoolSize int
 
+	// logf receives one message the first time a session's fatal error
+	// marks it blocked (CO-112) — never on every retry. Defaults to
+	// slog.Warn.
+	logf func(msg string)
 	// now is overridable so tests can control debounce timing
 	// deterministically without real sleeps.
 	now func() time.Time
@@ -110,6 +119,9 @@ func (c *Config) applyDefaults() {
 	if c.now == nil {
 		c.now = time.Now
 	}
+	if c.logf == nil {
+		c.logf = func(msg string) { slog.Warn(msg) }
+	}
 }
 
 // sessionSchedule is the per-session debounce/watermark state.
@@ -128,6 +140,22 @@ type sessionSchedule struct {
 	dueAt            time.Time // zero means "no upload currently scheduled"
 	cwd              string    // most recently seen cwd for this session
 	transcriptPath   string    // most recently seen transcript_path for this session
+
+	// attempt (CO-112) is the number of consecutive retryable failures
+	// since the last success — 0 means the last attempt (if any)
+	// succeeded. Drives backoffDelay; never touched by a fatal failure,
+	// since a blocked session isn't on a retry timer at all.
+	attempt int
+	// blocked (CO-112) is true once ErrFatal has been seen for this
+	// session and no later attempt has succeeded. A blocked session has
+	// no dueAt timer — readNew's normal "a new event re-arms dueAt" path
+	// is what gives it another chance, not a clock.
+	blocked bool
+	// blockedReason is ErrFatal's error text as of the attempt that set
+	// blocked — kept around (cheaply) for whatever CO-113's `carryon
+	// status` ends up needing to show; this ticket doesn't build that
+	// display itself.
+	blockedReason string
 }
 
 type uploadResult struct {
@@ -292,11 +320,31 @@ func (a *Agent) handleResult(res uploadResult) {
 	s.uploading = false
 
 	if res.err != nil {
-		// CO-112 owns real retry/backoff policy; for now just try again
-		// after one more debounce window instead of spinning.
-		s.dueAt = a.cfg.now().Add(a.cfg.UploadInterval)
+		if errors.Is(res.err, ErrFatal) {
+			// CO-112: a fatal error means retrying on a timer is
+			// pointless — stop scheduling one. readNew's normal
+			// "a new event re-arms dueAt" path (since it's left zero
+			// here) is what gives this session another chance, so a
+			// developer who keeps working after whatever broke access
+			// gets fixed doesn't need the agent restarted to notice.
+			if !s.blocked {
+				a.cfg.logf(fmt.Sprintf("Session %s is blocked: %v", res.sessionID, res.err))
+			}
+			s.blocked = true
+			s.blockedReason = res.err.Error()
+			s.dueAt = time.Time{}
+			return
+		}
+		// Retryable: exponential backoff, not "try again next debounce
+		// window regardless" — a session stuck offline must not spin.
+		s.attempt++
+		s.dueAt = a.cfg.now().Add(backoffDelay(s.attempt))
 		return
 	}
+
+	s.blocked = false
+	s.blockedReason = ""
+	s.attempt = 0
 
 	if res.dispatchedThrough > s.confirmedThrough {
 		s.confirmedThrough = res.dispatchedThrough

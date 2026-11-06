@@ -114,7 +114,7 @@ func (f *Filter) Upload(ctx context.Context, session agent.Session) error {
 
 	match, err := f.lookup(ctx, remote)
 	if err != nil {
-		return fmt.Errorf("filter: checking project registration for %s: %w", remote, err)
+		return agent.ClassifyError(fmt.Errorf("filter: checking project registration for %s: %w", remote, err))
 	}
 	if match == nil {
 		f.warnOnce(remote)
