@@ -1,30 +1,81 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"os"
-	"os/signal"
+	"log/slog"
+	"path/filepath"
 
+	"github.com/devminified/carryon/internal/agent"
+	"github.com/devminified/carryon/internal/config"
+	"github.com/devminified/carryon/internal/service"
+	kservice "github.com/kardianos/service"
 	"github.com/spf13/cobra"
 )
 
-// newAgentCmd is a placeholder for CO-107's capture agent daemon. It
-// deliberately does not exit immediately (the way the other stubs do,
-// returning errNotImplemented): CO-106's `carryon install` registers this
-// command as a real OS-level service (launchd/systemd/Windows Service) and
-// starts it, so an instant non-zero exit here would crash-loop against the
-// service manager until CO-107 actually lands. Idling until the service
-// manager stops it is the safe placeholder behavior; CO-107 replaces the
-// body of this command with the real tailing/upload loop.
+// logUploader is a placeholder agent.Uploader until CO-108 (project
+// filter), CO-109 (incremental reader) and CO-110 (chunk upload pipeline)
+// land — CO-107 only needs something that satisfies the interface so its
+// scheduling engine (debounce, worker pool, cursor, compaction) runs for
+// real against genuine queue.jsonl events.
+type logUploader struct{}
+
+func (logUploader) Upload(_ context.Context, sessionID string) error {
+	slog.Info("would upload session (not yet implemented, see CO-108/CO-109/CO-110)", "session_id", sessionID)
+	return nil
+}
+
+// agentProgram adapts internal/agent.Agent to kservice.Interface. Start
+// launches the agent's Run loop in the background; Stop cancels it and
+// waits for it to finish — this is what gives in-flight uploads a chance
+// to persist state before exit (go-conventions.md), and on Windows it's
+// the *only* way to be notified of a stop at all (see service package doc
+// comment).
+type agentProgram struct {
+	cancel context.CancelFunc
+	done   chan error
+}
+
+func (p *agentProgram) Start(kservice.Service) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	p.cancel = cancel
+	p.done = make(chan error, 1)
+
+	carryonDir, err := config.Dir()
+	if err != nil {
+		return fmt.Errorf("agent: %w", err)
+	}
+
+	a, err := agent.New(agent.Config{
+		QueuePath:  filepath.Join(carryonDir, "queue.jsonl"),
+		CursorPath: filepath.Join(carryonDir, "agent-cursor.json"),
+		Uploader:   logUploader{},
+	})
+	if err != nil {
+		return fmt.Errorf("agent: %w", err)
+	}
+
+	go func() { p.done <- a.Run(ctx) }()
+	return nil
+}
+
+func (p *agentProgram) Stop(kservice.Service) error {
+	p.cancel()
+	return <-p.done
+}
+
 func newAgentCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "agent",
-		Short: "Run the capture agent daemon (CO-107)",
+		Short: "Run the capture agent daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "carryon agent: capture loop not yet implemented (CO-107); idling until stopped")
-			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
-			defer stop()
-			<-ctx.Done()
+			s, err := service.New(&agentProgram{})
+			if err != nil {
+				return fmt.Errorf("agent: %w", err)
+			}
+			if err := s.Run(); err != nil {
+				return fmt.Errorf("agent: %w", err)
+			}
 			return nil
 		},
 	}
