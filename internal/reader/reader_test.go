@@ -274,24 +274,65 @@ func expectedContent(n int) string {
 	return string(b)
 }
 
-func TestHeadHashStableForSameContent(t *testing.T) {
+// TestReadAppendOnlySmallFileNeverFalselyRewritten is CO-110's integration
+// test caught this for real: a file under headHashBytes that's only ever
+// appended to (the common case for a fresh session transcript) must never
+// be reported as rewritten, no matter how many separate Read calls tail
+// it, and each call's returned range must pick up exactly where the last
+// one's Offset left off.
+func TestReadAppendOnlySmallFileNeverFalselyRewritten(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	write(t, path, "")
+
+	lines := []string{
+		`{"a":1}` + "\n",
+		`{"a":2}` + "\n",
+		`{"a":3}` + "\n",
+	}
+
+	var ptr state.Pointer
+	var gotOffsets []int64
+	for i, line := range lines {
+		appendTo(t, path, line)
+
+		data, next, rewritten, err := Read(path, ptr)
+		if err != nil {
+			t.Fatalf("Read() #%d error = %v", i, err)
+		}
+		if rewritten {
+			t.Fatalf("Read() #%d reported rewritten=true for a pure append, want false", i)
+		}
+		if string(data) != line {
+			t.Fatalf("Read() #%d = %q, want only the newly appended line %q", i, data, line)
+		}
+		gotOffsets = append(gotOffsets, next.Offset)
+		ptr = next
+	}
+
+	wantTotal := int64(len(lines[0]) + len(lines[1]) + len(lines[2]))
+	if gotOffsets[2] != wantTotal {
+		t.Errorf("final offset = %d, want %d", gotOffsets[2], wantTotal)
+	}
+}
+
+func TestHeadHashNStableForSameContent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	write(t, path, `{"a":1}`+"\n")
 
-	h1, err := headHash(path)
+	h1, err := headHashN(path, headHashBytes)
 	if err != nil {
-		t.Fatalf("headHash() error = %v", err)
+		t.Fatalf("headHashN() error = %v", err)
 	}
-	h2, err := headHash(path)
+	h2, err := headHashN(path, headHashBytes)
 	if err != nil {
-		t.Fatalf("headHash() error = %v", err)
+		t.Fatalf("headHashN() error = %v", err)
 	}
 	if h1 != h2 {
-		t.Errorf("headHash() not stable across calls: %q vs %q", h1, h2)
+		t.Errorf("headHashN() not stable across calls: %q vs %q", h1, h2)
 	}
 
 	want := sha256.Sum256([]byte(`{"a":1}` + "\n"))
 	if h1 != hex.EncodeToString(want[:]) {
-		t.Errorf("headHash() = %q, want the sha256 of the file's content", h1)
+		t.Errorf("headHashN() = %q, want the sha256 of the file's content", h1)
 	}
 }

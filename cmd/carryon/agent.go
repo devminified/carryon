@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"path/filepath"
 	"sync"
 
@@ -13,20 +12,10 @@ import (
 	"github.com/devminified/carryon/internal/config"
 	"github.com/devminified/carryon/internal/filter"
 	"github.com/devminified/carryon/internal/service"
+	"github.com/devminified/carryon/internal/upload"
 	kservice "github.com/kardianos/service"
 	"github.com/spf13/cobra"
 )
-
-// stubUploader is a placeholder agent.Uploader until CO-109 (incremental
-// reader) and CO-110 (chunk upload pipeline) land — filter.Filter (CO-108)
-// is real and wraps this, so a session that passes the project-registration
-// check reaches here and this is as far as the pipeline goes for now.
-type stubUploader struct{}
-
-func (stubUploader) Upload(_ context.Context, session agent.Session) error {
-	slog.Info("would upload session (not yet implemented, see CO-109/CO-110)", "session_id", session.ID)
-	return nil
-}
 
 // lazyAPI resolves an api.Client and auth.Provider on first successful
 // use, retrying on every call until config.Load() and auth.NewProvider()
@@ -38,9 +27,9 @@ func (stubUploader) Upload(_ context.Context, session agent.Session) error {
 // resolved, the same *auth.Provider is reused across calls so its
 // in-memory access-token cache actually does something.
 type lazyAPI struct {
-	mu       sync.Mutex
-	client   *api.Client
-	provider *auth.Provider
+	mu           sync.Mutex
+	cachedClient *api.Client
+	provider     *auth.Provider
 }
 
 func (l *lazyAPI) matchProject(ctx context.Context, canonicalRemote string) (*api.MatchProjectResult, error) {
@@ -55,11 +44,29 @@ func (l *lazyAPI) matchProject(ctx context.Context, canonicalRemote string) (*ap
 	return client.MatchProject(ctx, token, canonicalRemote)
 }
 
+// client and accessToken expose the same lazy resolution as matchProject,
+// in the shapes upload.Config needs (upload.ClientSource, upload.TokenSource).
+func (l *lazyAPI) client() (*api.Client, error) {
+	client, _, err := l.resolve()
+	if err != nil {
+		return nil, fmt.Errorf("agent: %w", err)
+	}
+	return client, nil
+}
+
+func (l *lazyAPI) accessToken(ctx context.Context) (string, error) {
+	_, provider, err := l.resolve()
+	if err != nil {
+		return "", fmt.Errorf("agent: %w", err)
+	}
+	return provider.AccessToken(ctx)
+}
+
 func (l *lazyAPI) resolve() (*api.Client, *auth.Provider, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.client != nil {
-		return l.client, l.provider, nil
+	if l.cachedClient != nil {
+		return l.cachedClient, l.provider, nil
 	}
 
 	cfg, err := config.Load()
@@ -71,9 +78,9 @@ func (l *lazyAPI) resolve() (*api.Client, *auth.Provider, error) {
 		return nil, nil, err
 	}
 
-	l.client = api.NewClient(cfg.APIURL, cfg.AnonKey)
+	l.cachedClient = api.NewClient(cfg.APIURL, cfg.AnonKey)
 	l.provider = provider
-	return l.client, l.provider, nil
+	return l.cachedClient, l.provider, nil
 }
 
 // agentProgram adapts internal/agent.Agent to kservice.Interface. Start
@@ -98,8 +105,16 @@ func (p *agentProgram) Start(kservice.Service) error {
 	}
 
 	lazy := &lazyAPI{}
+	realUploader, err := upload.New(upload.Config{
+		ClientSource: lazy.client,
+		TokenSource:  lazy.accessToken,
+		StateDir:     filepath.Join(carryonDir, "state"),
+	})
+	if err != nil {
+		return fmt.Errorf("agent: %w", err)
+	}
 	uploader := filter.New(filter.Config{
-		Inner:        stubUploader{},
+		Inner:        realUploader,
 		MatchProject: lazy.matchProject,
 	})
 

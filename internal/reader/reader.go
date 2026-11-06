@@ -90,13 +90,25 @@ func Read(path string, prior state.Pointer) (data []byte, next state.Pointer, re
 		return nil, prior, false, fmt.Errorf("stat %s: %w", path, err)
 	}
 
-	head, err := headHash(path)
+	// Comparing against prior.HeadHash must hash the *same* window prior
+	// hashed — min(headHashBytes, prior.FileSize) — not
+	// min(headHashBytes, info.Size()). A file under headHashBytes that's
+	// only grown (the common case: most sessions start under 4KB) would
+	// otherwise hash a bigger window every read than it did last time,
+	// so the hashes would never match and every single read would look
+	// like a rewrite. Found via a real growing file in CO-110's
+	// integration test, not a hypothetical.
+	compareWindow := prior.FileSize
+	if compareWindow > headHashBytes {
+		compareWindow = headHashBytes
+	}
+	compareHash, err := headHashN(path, compareWindow)
 	if err != nil {
 		return nil, prior, false, err
 	}
 
 	readFrom := prior.Offset
-	rewritten = prior.HeadHash != "" && (info.Size() < prior.Offset || head != prior.HeadHash)
+	rewritten = prior.HeadHash != "" && (info.Size() < prior.Offset || compareHash != prior.HeadHash)
 	if rewritten {
 		readFrom = 0
 	}
@@ -106,16 +118,33 @@ func Read(path string, prior state.Pointer) (data []byte, next state.Pointer, re
 		return nil, prior, false, err
 	}
 
+	// The hash stored for the *next* comparison must cover this read's
+	// own window (min(headHashBytes, info.Size())), not the possibly
+	// smaller compareWindow just used above.
+	newWindow := info.Size()
+	if newWindow > headHashBytes {
+		newWindow = headHashBytes
+	}
+	newHash := compareHash
+	if newWindow != compareWindow {
+		newHash, err = headHashN(path, newWindow)
+		if err != nil {
+			return nil, prior, false, err
+		}
+	}
+
 	next = state.Pointer{
 		Offset:   newOffset,
 		NextSeq:  prior.NextSeq,
 		FileSize: info.Size(),
-		HeadHash: head,
+		HeadHash: newHash,
 	}
 	return raw, next, rewritten, nil
 }
 
-func headHash(path string) (string, error) {
+// headHashN hashes exactly the first n bytes of path (or the whole file,
+// if it's shorter than n).
+func headHashN(path string, n int64) (string, error) {
 	f, err := os.Open(path) // #nosec G304 -- path is caller-controlled (a Claude Code transcript path recorded by internal/hook)
 	if err != nil {
 		return "", fmt.Errorf("opening %s: %w", path, err)
@@ -123,7 +152,7 @@ func headHash(path string) (string, error) {
 	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
-	if _, err := io.CopyN(h, f, headHashBytes); err != nil && !errors.Is(err, io.EOF) {
+	if _, err := io.CopyN(h, f, n); err != nil && !errors.Is(err, io.EOF) {
 		return "", fmt.Errorf("hashing %s: %w", path, err)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
