@@ -45,12 +45,21 @@ jobs:
       - uses: supabase/setup-cli@v3
         with:
           version: 2.111.0
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.1.4 # matches the edge-runtime's Deno version (see ci.yml's supabase start, deploy-functions.yml)
       - name: start local stack (applies every migration to a fresh database)
         run: supabase start
       - name: db lint
         run: supabase db lint
       - name: migrations are idempotent on re-run (CO-102)
         run: supabase db reset
+      - name: deno lint
+        run: deno lint supabase/functions
+      - name: deno fmt check
+        run: deno fmt --check supabase/functions
+      - name: deno test
+        run: deno test --allow-net --allow-env supabase/functions
 
   cross-compile:
     runs-on: ubuntu-latest
