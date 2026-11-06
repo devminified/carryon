@@ -15,14 +15,6 @@ func notImplementedCmd(use, short string) *cobra.Command {
 	}
 }
 
-func newInstallCmd() *cobra.Command {
-	return notImplementedCmd("install", "Install the Carryon hooks and background agent (CO-106)")
-}
-
-func newAgentCmd() *cobra.Command {
-	return notImplementedCmd("agent", "Run the capture agent daemon (CO-107)")
-}
-
 func newStatusCmd() *cobra.Command {
 	return notImplementedCmd("status", "Show login, agent, and session status (CO-113)")
 }
