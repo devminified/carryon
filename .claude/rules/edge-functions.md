@@ -6,7 +6,7 @@ The named RPCs: `register-session`, `register-chunk`, `confirm-chunk`, `end-sess
 
 ```ts
 // supabase/functions/register-chunk/index.ts
-import { z } from 'npm:zod';
+import { z } from 'npm:zod@4.6.7'; // pin an exact version — deno lint's no-unversioned-import is not optional
 
 const Input = z.object({
   sessionId: z.string().uuid(),
