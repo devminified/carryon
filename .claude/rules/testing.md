@@ -17,6 +17,7 @@ Four runtimes, one CI run per PR. This mirrors Doc's "CI on every pull request" 
 
 ## Edge Functions
 
+- `deno lint`, `deno fmt --check`, and `deno test` across `supabase/functions/` — all three are a required CI check (`ci.yml`'s `supabase` job), same as Go's static analysis.
 - `deno test` per function, covering the Zod schema boundary and idempotency on `(session_id, seq)` retries (I3).
 
 ## Web (`web/`)

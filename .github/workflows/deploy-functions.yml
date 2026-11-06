@@ -1,0 +1,44 @@
+name: deploy-functions
+
+# Deploys supabase/functions/ to a real Supabase project, automatically, on
+# every merge to main that touches a function. This is the only sanctioned
+# way a function reaches staging or production — never by running
+# `supabase functions deploy` by hand from a dev machine. By the time this
+# workflow fires, the `supabase` job in ci.yml has already run deno lint,
+# deno fmt --check and deno test against the same code (required status
+# check on main), so cloud deploy is always preceded by a local pass.
+#
+# Mirrors deploy-db.yml's shape; see that file for the equivalent migration
+# pipeline.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/functions/**"
+  workflow_dispatch: {} # manual trigger, for verifying the pipeline itself (e.g. after rotating secrets)
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.111.0
+      - name: link to carryon-staging
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      - name: deploy functions
+        run: supabase functions deploy --linked
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+  # No deploy-production job yet, deliberately — carryon-prod stays
+  # unlinked/unpushed until a ticket actually needs it (issue #59).
