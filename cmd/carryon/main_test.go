@@ -10,10 +10,10 @@ var allSubcommands = []string{
 	"version", "admin", "install", "login", "logout", "hook", "agent", "status", "ls", "pull", "export", "rename",
 }
 
-// login and logout are implemented (CO-103); everything else still
-// scaffolds the CLI surface for a later ticket.
+// login, logout (CO-103) and hook (CO-105) are implemented; everything
+// else still scaffolds the CLI surface for a later ticket.
 var stubSubcommands = []string{
-	"install", "hook", "agent", "status", "ls", "pull", "export", "rename",
+	"install", "agent", "status", "ls", "pull", "export", "rename",
 }
 
 func TestRootCommandListsAllSubcommands(t *testing.T) {
@@ -59,7 +59,7 @@ func TestRunExitCode(t *testing.T) {
 	orig := os.Args
 	defer func() { os.Args = orig }()
 
-	os.Args = []string{"carryon", "hook"}
+	os.Args = []string{"carryon", "agent"}
 	if code := run(); code != 2 {
 		t.Errorf("run() with a stub subcommand = %d, want 2", code)
 	}
