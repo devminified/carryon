@@ -7,7 +7,7 @@ import (
 )
 
 var allSubcommands = []string{
-	"version", "install", "login", "logout", "hook", "agent", "status", "ls", "pull", "export", "rename",
+	"version", "admin", "install", "login", "logout", "hook", "agent", "status", "ls", "pull", "export", "rename",
 }
 
 // login and logout are implemented (CO-103); everything else still
