@@ -17,7 +17,8 @@ import (
 type countingUploader struct {
 	mu          sync.Mutex
 	calls       map[string]int
-	block       chan struct{} // if non-nil, Upload blocks on this until it's closed
+	lastFinal   map[string]bool // Session.Final as seen on the most recent call per session
+	block       chan struct{}   // if non-nil, Upload blocks on this until it's closed
 	inFlight    int32
 	maxInFlight int32
 	failTimes   int // fail this many times per session before succeeding
@@ -40,6 +41,10 @@ func (u *countingUploader) Upload(ctx context.Context, session Session) error {
 
 	u.mu.Lock()
 	u.calls[session.ID]++
+	if u.lastFinal == nil {
+		u.lastFinal = map[string]bool{}
+	}
+	u.lastFinal[session.ID] = session.Final
 	shouldFail := u.failed[session.ID] < u.failTimes
 	if shouldFail {
 		u.failed[session.ID]++
@@ -64,6 +69,12 @@ func (u *countingUploader) count(sessionID string) int {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return u.calls[sessionID]
+}
+
+func (u *countingUploader) final(sessionID string) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.lastFinal[sessionID]
 }
 
 func (u *countingUploader) totalCalls() int {
@@ -184,6 +195,43 @@ func TestAgentSessionEndTriggersUploadQuickly(t *testing.T) {
 	elapsed := time.Since(start)
 	if elapsed > 1*time.Second {
 		t.Errorf("SessionEnd upload took %v, want well under the 5s budget", elapsed)
+	}
+}
+
+func TestAgentSetsSessionFinalOnlyForASessionEndDispatch(t *testing.T) {
+	// CO-111: Agent must tell the Uploader which dispatch is covering a
+	// SessionEnd event (Session.Final) — internal/upload uses it to call
+	// end-session only after that upload succeeds. A normal debounced
+	// upload must never be marked Final.
+	queuePath, cursorPath := agentTestPaths(t)
+	uploader := newCountingUploader()
+
+	a, err := New(Config{
+		QueuePath:      queuePath,
+		CursorPath:     cursorPath,
+		Uploader:       uploader,
+		UploadInterval: 50 * time.Millisecond,
+		PollInterval:   10 * time.Millisecond,
+		WorkerPoolSize: 2,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = a.Run(ctx) }()
+
+	appendHookEvent(t, queuePath, "s1", "Stop")
+	waitFor(t, 1*time.Second, func() bool { return uploader.count("s1") >= 1 })
+	if uploader.final("s1") {
+		t.Error("a normal debounced upload was marked Final, want false")
+	}
+
+	appendHookEvent(t, queuePath, "s2", "SessionEnd")
+	waitFor(t, 1*time.Second, func() bool { return uploader.count("s2") >= 1 })
+	if !uploader.final("s2") {
+		t.Error("the SessionEnd-triggered upload was not marked Final, want true")
 	}
 }
 

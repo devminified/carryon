@@ -16,6 +16,12 @@ function fakeDeps(opts: {
   info?: { data?: any; error?: any };
   // deno-lint-ignore no-explicit-any
   chunkUpsert?: { error?: any };
+  // deno-lint-ignore no-explicit-any
+  chunkRows?: { data?: any; error?: any };
+  // deno-lint-ignore no-explicit-any
+  sessionUpdate?: { error?: any };
+  // deno-lint-ignore no-explicit-any
+  onSessionUpdate?: (row: any) => void;
 }): Deps {
   return {
     requireUser: () => Promise.resolve(opts.user as never),
@@ -35,6 +41,14 @@ function fakeDeps(opts: {
                     ),
                 }),
               }),
+              // deno-lint-ignore no-explicit-any
+              update: (row: any) => {
+                opts.onSessionUpdate?.(row);
+                return {
+                  eq: () =>
+                    Promise.resolve(opts.sessionUpdate ?? { error: null }),
+                };
+              },
             };
           }
           if (table === "project_members") {
@@ -58,6 +72,15 @@ function fakeDeps(opts: {
             return {
               upsert: () =>
                 Promise.resolve(opts.chunkUpsert ?? { error: null }),
+              select: () => ({
+                eq: () =>
+                  Promise.resolve(
+                    opts.chunkRows ?? {
+                      data: [{ byte_start: 0, byte_end: 100 }],
+                      error: null,
+                    },
+                  ),
+              }),
             };
           }
           throw new Error(`unexpected table ${table}`);
@@ -167,6 +190,65 @@ Deno.test("surfaces a session_chunks upsert failure as 500", async () => {
   const deps = fakeDeps({
     user: fakeUser(),
     chunkUpsert: { error: { code: "XXXXX", message: "boom" } },
+  });
+
+  const res = await handle(req(validBody()), deps);
+  assertEquals(res.status, 500);
+});
+
+Deno.test("recomputes total_bytes from session_chunks and bumps last_activity_at", async () => {
+  // deno-lint-ignore no-explicit-any
+  let updated: any;
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    chunkRows: {
+      data: [
+        { byte_start: 0, byte_end: 100 },
+        { byte_start: 100, byte_end: 250 },
+      ],
+      error: null,
+    },
+    onSessionUpdate: (row) => {
+      updated = row;
+    },
+  });
+
+  const res = await handle(req(validBody()), deps);
+  assertEquals(res.status, 200);
+  assertEquals(updated.total_bytes, 250); // (100-0) + (250-100), not just this one chunk
+  assertEquals(typeof updated.last_activity_at, "string");
+});
+
+Deno.test("sets status back to live and clears ended_reason — a resumed session un-ends itself", async () => {
+  // deno-lint-ignore no-explicit-any
+  let updated: any;
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    onSessionUpdate: (row) => {
+      updated = row;
+    },
+  });
+
+  const res = await handle(req(validBody()), deps);
+  assertEquals(res.status, 200);
+  assertEquals(updated.status, "live");
+  assertEquals(updated.ended_reason, null);
+});
+
+Deno.test("surfaces a total_bytes recompute failure as 500", async () => {
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    chunkRows: { data: null, error: { code: "XXXXX", message: "boom" } },
+  });
+
+  const res = await handle(req(validBody()), deps);
+  assertEquals(res.status, 500);
+});
+
+Deno.test("surfaces a session activity update failure as 500", async () => {
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    sessionUpdate: { error: { code: "XXXXX", message: "boom" } },
   });
 
   const res = await handle(req(validBody()), deps);

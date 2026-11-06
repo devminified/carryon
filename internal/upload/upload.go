@@ -92,12 +92,19 @@ func New(cfg Config) (*Uploader, error) {
 // — only internal/filter.Filter should ever call an Uploader that isn't a
 // no-op placeholder, and Filter sets it from its own match-project lookup
 // before calling through.
+//
+// If session.Final is set (the agent dispatched this call to cover a
+// SessionEnd event), Upload calls end-session (CO-111) once every stream
+// has uploaded successfully — never before, so a session is only marked
+// ended once its last bytes are actually confirmed durable.
 func (u *Uploader) Upload(ctx context.Context, session agent.Session) error {
 	if session.ProjectID == "" {
 		return fmt.Errorf("upload: session %s has no ProjectID — must be called through filter.Filter", session.ID)
 	}
 
-	if err := u.uploadStream(ctx, session, mainStreamID, session.ID, session.TranscriptPath); err != nil {
+	meta := gatherMetadata(ctx, session.Cwd)
+
+	if err := u.uploadStream(ctx, session, mainStreamID, session.ID, session.TranscriptPath, meta); err != nil {
 		return fmt.Errorf("uploading main transcript: %w", err)
 	}
 
@@ -107,8 +114,22 @@ func (u *Uploader) Upload(ctx context.Context, session agent.Session) error {
 	}
 	for _, sa := range subagents {
 		stateKey := state.SubagentKey(session.ID, sa.AgentID)
-		if err := u.uploadStream(ctx, session, sa.AgentID, stateKey, sa.Path); err != nil {
+		if err := u.uploadStream(ctx, session, sa.AgentID, stateKey, sa.Path, meta); err != nil {
 			return fmt.Errorf("uploading subagent %s: %w", sa.AgentID, err)
+		}
+	}
+
+	if session.Final {
+		token, err := u.tokenSource(ctx)
+		if err != nil {
+			return fmt.Errorf("getting access token for end-session: %w", err)
+		}
+		client, err := u.clientSource()
+		if err != nil {
+			return fmt.Errorf("getting api client for end-session: %w", err)
+		}
+		if err := client.EndSession(ctx, token, session.ID); err != nil {
+			return fmt.Errorf("ending session: %w", err)
 		}
 	}
 	return nil
@@ -118,7 +139,7 @@ func (u *Uploader) Upload(ctx context.Context, session agent.Session) error {
 // or one subagent) and uploads it as one or more chunks, persisting state
 // after each confirmed chunk so a crash mid-stream only re-uploads what
 // wasn't yet confirmed (I3) — never the whole thing again.
-func (u *Uploader) uploadStream(ctx context.Context, session agent.Session, streamID, stateKey, path string) error {
+func (u *Uploader) uploadStream(ctx context.Context, session agent.Session, streamID, stateKey, path string, meta sessionMetadata) error {
 	prior, err := state.Load(u.stateDir, stateKey)
 	if err != nil {
 		return fmt.Errorf("loading state for %s: %w", stateKey, err)
@@ -150,7 +171,7 @@ func (u *Uploader) uploadStream(ctx context.Context, session agent.Session, stre
 		byteEnd := pos + int64(n)
 		pos = byteEnd
 
-		if err := u.uploadChunk(ctx, session, streamID, seq, byteStart, byteEnd, piece); err != nil {
+		if err := u.uploadChunk(ctx, session, streamID, seq, byteStart, byteEnd, piece, meta); err != nil {
 			return fmt.Errorf("chunk seq %d: %w", seq, err)
 		}
 		seq++
@@ -173,7 +194,7 @@ func (u *Uploader) uploadStream(ctx context.Context, session agent.Session, stre
 // retries once — CO-110's "an expired signed URL is re-requested
 // automatically" testing point. Broader retry/backoff policy belongs to
 // CO-112, not here.
-func (u *Uploader) uploadChunk(ctx context.Context, session agent.Session, streamID string, seq int, byteStart, byteEnd int64, data []byte) error {
+func (u *Uploader) uploadChunk(ctx context.Context, session agent.Session, streamID string, seq int, byteStart, byteEnd int64, data []byte, meta sessionMetadata) error {
 	sum := sha256.Sum256(data)
 	sha256Hex := hex.EncodeToString(sum[:])
 
@@ -192,15 +213,19 @@ func (u *Uploader) uploadChunk(ctx context.Context, session agent.Session, strea
 	}
 
 	regInput := api.RegisterChunkInput{
-		SessionID:   session.ID,
-		ProjectID:   session.ProjectID,
-		OriginalCwd: session.Cwd,
-		StreamID:    streamID,
-		Seq:         seq,
-		ByteStart:   byteStart,
-		ByteEnd:     byteEnd,
-		SHA256:      sha256Hex,
-		Size:        byteEnd - byteStart,
+		SessionID:         session.ID,
+		ProjectID:         session.ProjectID,
+		OriginalCwd:       session.Cwd,
+		StreamID:          streamID,
+		Machine:           meta.Machine,
+		Branch:            meta.Branch,
+		HeadSHA:           meta.HeadSHA,
+		ClaudeCodeVersion: meta.ClaudeCodeVersion,
+		Seq:               seq,
+		ByteStart:         byteStart,
+		ByteEnd:           byteEnd,
+		SHA256:            sha256Hex,
+		Size:              byteEnd - byteStart,
 	}
 	reg, err := client.RegisterChunk(ctx, token, regInput)
 	if err != nil {

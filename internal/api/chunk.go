@@ -14,16 +14,26 @@ import (
 // own transcript, or a subagent's agent_id for one of its child streams
 // (CO-109) — without it, a subagent's chunk numbering could collide with
 // the main stream's.
+//
+// Machine/Branch/HeadSHA/ClaudeCodeVersion are CO-111's session-
+// identifying fields — the server can't exec git or read the laptop's
+// own hostname, so the agent gathers them and sends them along. They're
+// only ever used by register-chunk's insert-if-missing on a session's
+// first chunk; harmless to send on every call.
 type RegisterChunkInput struct {
-	SessionID   string
-	ProjectID   string
-	OriginalCwd string
-	StreamID    string
-	Seq         int
-	ByteStart   int64
-	ByteEnd     int64
-	SHA256      string
-	Size        int64
+	SessionID         string
+	ProjectID         string
+	OriginalCwd       string
+	StreamID          string
+	Machine           string
+	Branch            string
+	HeadSHA           string
+	ClaudeCodeVersion string
+	Seq               int
+	ByteStart         int64
+	ByteEnd           int64
+	SHA256            string
+	Size              int64
 }
 
 // RegisterChunkResult is register-chunk's response: a signed Storage
@@ -53,6 +63,22 @@ func (c *Client) RegisterChunk(ctx context.Context, accessToken string, in Regis
 		"byteEnd":     in.ByteEnd,
 		"sha256":      in.SHA256,
 		"size":        in.Size,
+	}
+	// Omitted rather than sent as "" when gathering failed — register-chunk's
+	// Zod schema treats these as optional ("unknown"), not "known to be
+	// empty", and an omitted key leaves the column null instead of storing
+	// a misleading empty string.
+	if in.Machine != "" {
+		body["machine"] = in.Machine
+	}
+	if in.Branch != "" {
+		body["branch"] = in.Branch
+	}
+	if in.HeadSHA != "" {
+		body["headSha"] = in.HeadSHA
+	}
+	if in.ClaudeCodeVersion != "" {
+		body["claudeCodeVersion"] = in.ClaudeCodeVersion
 	}
 	var out RegisterChunkResult
 	if err := c.post(ctx, "register-chunk", accessToken, body, &out); err != nil {

@@ -8,6 +8,15 @@
 // e.g. after a network failure on the *response* to a confirm that
 // actually landed — replaces the row instead of erroring or duplicating.
 //
+// CO-111: every confirmed chunk also bumps the session's
+// last_activity_at, recomputes total_bytes (summed fresh from
+// session_chunks rather than incremented, so a retried confirm of an
+// already-recorded chunk never double-counts it — the idempotency this
+// function already needs for the chunk row itself), and sets
+// status = 'live' (clearing any prior ended_reason) — this is what makes
+// a resumed session (same ID, new chunks after 'ended') go back to
+// 'live' with no special-cased "is this a resume" branch.
+//
 // Service role for the writes (CO-102: until CO-302's RLS policies land),
 // but identity and membership are still enforced here from the caller's
 // own JWT. The object key is derived server-side from the session's own
@@ -133,6 +142,36 @@ export async function handle(
     );
   if (chunkErr) {
     console.error("confirm-chunk: chunk insert failed", chunkErr.code);
+    return errorResponse(500, "internal_error");
+  }
+
+  const { data: chunkRows, error: sumErr } = await admin
+    .from("session_chunks")
+    .select("byte_start, byte_end")
+    .eq("session_id", input.sessionId);
+  if (sumErr) {
+    console.error("confirm-chunk: total_bytes recompute failed", sumErr.code);
+    return errorResponse(500, "internal_error");
+  }
+  const totalBytes = (chunkRows ?? []).reduce(
+    (sum, row) => sum + (row.byte_end - row.byte_start),
+    0,
+  );
+
+  const { error: activityErr } = await admin
+    .from("sessions")
+    .update({
+      last_activity_at: new Date().toISOString(),
+      total_bytes: totalBytes,
+      status: "live",
+      ended_reason: null,
+    })
+    .eq("id", input.sessionId);
+  if (activityErr) {
+    console.error(
+      "confirm-chunk: session activity update failed",
+      activityErr.code,
+    );
     return errorResponse(500, "internal_error");
   }
 

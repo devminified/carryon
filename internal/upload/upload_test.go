@@ -31,14 +31,18 @@ import (
 type fakeBackend struct {
 	mu sync.Mutex
 
-	registerCalls []map[string]any
-	confirmCalls  []map[string]any
-	objects       map[string][]byte // objectKey -> uploaded (compressed) bytes
-	putAttempts   map[string]int
+	registerCalls   []map[string]any
+	confirmCalls    []map[string]any
+	endSessionCalls []map[string]any
+	objects         map[string][]byte // objectKey -> uploaded (compressed) bytes
+	putAttempts     map[string]int
 
 	// failFirstPutFor, if set to an objectKey, makes the first PUT to it
 	// fail (simulating an expired/invalid signed URL); any retry succeeds.
 	failFirstPutFor string
+
+	// failEndSession, if true, makes end-session respond 500.
+	failEndSession bool
 }
 
 func newFakeBackend() *fakeBackend {
@@ -59,6 +63,7 @@ func (b *fakeBackend) server() *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/functions/v1/register-chunk", b.handleRegister)
 	mux.HandleFunc("/functions/v1/confirm-chunk", b.handleConfirm)
+	mux.HandleFunc("/functions/v1/end-session", b.handleEndSession)
 	mux.HandleFunc(storagePathPrefix, b.handlePut)
 	return httptest.NewServer(mux)
 }
@@ -86,6 +91,22 @@ func (b *fakeBackend) handleConfirm(w http.ResponseWriter, r *http.Request) {
 	b.confirmCalls = append(b.confirmCalls, body)
 	b.mu.Unlock()
 
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+func (b *fakeBackend) handleEndSession(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	b.mu.Lock()
+	b.endSessionCalls = append(b.endSessionCalls, body)
+	fail := b.failEndSession
+	b.mu.Unlock()
+
+	if fail {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
@@ -123,6 +144,12 @@ func (b *fakeBackend) confirmCallCount() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return len(b.confirmCalls)
+}
+
+func (b *fakeBackend) endSessionCallCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.endSessionCalls)
 }
 
 func fakeTokenSource(_ context.Context) (string, error) {
@@ -424,6 +451,111 @@ func TestUploadIncludesSubagentStreams(t *testing.T) {
 	}
 	if mainState.NextSeq != 1 || subState.NextSeq != 1 {
 		t.Errorf("main.NextSeq=%d subagent.NextSeq=%d, want both 1 (independent counters)", mainState.NextSeq, subState.NextSeq)
+	}
+}
+
+func TestUploadCallsEndSessionWhenFinal(t *testing.T) {
+	backend := newFakeBackend()
+	srv := backend.server()
+	defer srv.Close()
+	u := newTestUploader(t, srv)
+
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "s1.jsonl")
+	writeTranscript(t, transcriptPath, `{"line":1}`+"\n")
+
+	session := agent.Session{ID: "s1", TranscriptPath: transcriptPath, ProjectID: "p1", Final: true}
+	if err := u.Upload(context.Background(), session); err != nil {
+		t.Fatalf("Upload() error = %v", err)
+	}
+
+	if backend.endSessionCallCount() != 1 {
+		t.Fatalf("end-session called %d times, want 1", backend.endSessionCallCount())
+	}
+	if backend.endSessionCalls[0]["sessionId"] != "s1" {
+		t.Errorf("end-session request = %+v", backend.endSessionCalls[0])
+	}
+}
+
+func TestUploadDoesNotCallEndSessionWhenNotFinal(t *testing.T) {
+	backend := newFakeBackend()
+	srv := backend.server()
+	defer srv.Close()
+	u := newTestUploader(t, srv)
+
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "s1.jsonl")
+	writeTranscript(t, transcriptPath, `{"line":1}`+"\n")
+
+	session := agent.Session{ID: "s1", TranscriptPath: transcriptPath, ProjectID: "p1"} // Final: false
+	if err := u.Upload(context.Background(), session); err != nil {
+		t.Fatalf("Upload() error = %v", err)
+	}
+
+	if backend.endSessionCallCount() != 0 {
+		t.Errorf("end-session called %d times, want 0 for a non-final upload", backend.endSessionCallCount())
+	}
+}
+
+func TestUploadSurfacesEndSessionFailure(t *testing.T) {
+	backend := newFakeBackend()
+	backend.failEndSession = true
+	srv := backend.server()
+	defer srv.Close()
+	u := newTestUploader(t, srv)
+
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "s1.jsonl")
+	writeTranscript(t, transcriptPath, `{"line":1}`+"\n")
+
+	session := agent.Session{ID: "s1", TranscriptPath: transcriptPath, ProjectID: "p1", Final: true}
+	if err := u.Upload(context.Background(), session); err == nil {
+		t.Fatal("Upload() = nil error, want end-session's failure to surface")
+	}
+
+	// The chunk itself still made it — only end-session failed — so a
+	// retry of the whole Upload() call (same Final=true) doesn't need to
+	// re-upload the already-confirmed chunk, just retry end-session.
+	if backend.confirmCallCount() != 1 {
+		t.Errorf("confirm-chunk called %d times, want 1 (the chunk upload itself succeeded)", backend.confirmCallCount())
+	}
+}
+
+func TestUploadPassesGatheredMetadataToRegisterChunk(t *testing.T) {
+	resetClaudeVersionCache(t)
+
+	backend := newFakeBackend()
+	srv := backend.server()
+	defer srv.Close()
+	u := newTestUploader(t, srv)
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init", "--quiet")
+	runGit(t, repoDir, "checkout", "--quiet", "-b", "feature/co-111")
+	sha := initRepoWithCommit(t, repoDir)
+	fakeClaudeOnPath(t, "9.9.9")
+
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "s1.jsonl")
+	writeTranscript(t, transcriptPath, `{"line":1}`+"\n")
+
+	session := agent.Session{ID: "s1", Cwd: repoDir, TranscriptPath: transcriptPath, ProjectID: "p1"}
+	if err := u.Upload(context.Background(), session); err != nil {
+		t.Fatalf("Upload() error = %v", err)
+	}
+
+	reg := backend.registerCalls[0]
+	if reg["branch"] != "feature/co-111" {
+		t.Errorf("branch = %v, want %q", reg["branch"], "feature/co-111")
+	}
+	if reg["headSha"] != sha {
+		t.Errorf("headSha = %v, want %q", reg["headSha"], sha)
+	}
+	if reg["claudeCodeVersion"] != "9.9.9" {
+		t.Errorf("claudeCodeVersion = %v, want %q", reg["claudeCodeVersion"], "9.9.9")
+	}
+	if reg["machine"] == "" || reg["machine"] == nil {
+		t.Error("machine = empty, want the real hostname")
 	}
 }
 
