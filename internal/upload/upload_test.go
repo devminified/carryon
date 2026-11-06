@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -43,6 +44,10 @@ type fakeBackend struct {
 
 	// failEndSession, if true, makes end-session respond 500.
 	failEndSession bool
+
+	// failRegisterWithStatus, if non-zero, makes every register-chunk
+	// call respond with this HTTP status instead of succeeding.
+	failRegisterWithStatus int
 }
 
 func newFakeBackend() *fakeBackend {
@@ -74,7 +79,14 @@ func (b *fakeBackend) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	b.mu.Lock()
 	b.registerCalls = append(b.registerCalls, body)
+	status := b.failRegisterWithStatus
 	b.mu.Unlock()
+
+	if status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden", "message": "boom"})
+		return
+	}
 
 	objectKey := fmt.Sprintf("%v/%v/%v/chunk-%v.jsonl.zst", body["projectId"], body["streamId"], body["sessionId"], body["seq"])
 	_ = json.NewEncoder(w).Encode(map[string]string{
@@ -556,6 +568,81 @@ func TestUploadPassesGatheredMetadataToRegisterChunk(t *testing.T) {
 	}
 	if reg["machine"] == "" || reg["machine"] == nil {
 		t.Error("machine = empty, want the real hostname")
+	}
+}
+
+func TestUploadClassifiesA403AsFatal(t *testing.T) {
+	// CO-112: a 403 from register-chunk — the caller lost access to the
+	// project — must reach Agent as agent.ErrFatal, not an ordinary
+	// retryable error, end to end through Upload's actual HTTP call, not
+	// just the standalone classifier function.
+	backend := newFakeBackend()
+	backend.failRegisterWithStatus = http.StatusForbidden
+	srv := backend.server()
+	defer srv.Close()
+	u := newTestUploader(t, srv)
+
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "s1.jsonl")
+	writeTranscript(t, transcriptPath, `{"line":1}`+"\n")
+
+	session := agent.Session{ID: "s1", TranscriptPath: transcriptPath, ProjectID: "p1"}
+	err := u.Upload(context.Background(), session)
+	if !errors.Is(err, agent.ErrFatal) {
+		t.Errorf("Upload() error = %v, want it classified as agent.ErrFatal", err)
+	}
+}
+
+func TestUploadRetriedAcrossMultipleFailedCallsStillRebuildsByteIdentical(t *testing.T) {
+	// CO-112 chaos-test flavor: "cut the network ... restore it, verify
+	// the byte-identical rebuild." Simulates the agent calling Upload()
+	// repeatedly during a simulated outage (register-chunk failing every
+	// time, as Agent's own backoff would retry on its normal schedule)
+	// before the network comes back — proving state never advances on a
+	// failed attempt (so the same range is retried, never skipped or
+	// duplicated) and the final content is still byte-identical.
+	backend := newFakeBackend()
+	backend.failRegisterWithStatus = http.StatusServiceUnavailable
+	srv := backend.server()
+	defer srv.Close()
+	u := newTestUploader(t, srv)
+
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "s1.jsonl")
+	content := `{"line":1}` + "\n" + `{"line":2}` + "\n"
+	writeTranscript(t, transcriptPath, content)
+
+	session := agent.Session{ID: "s1", TranscriptPath: transcriptPath, ProjectID: "p1"}
+
+	for i := 0; i < 5; i++ {
+		if err := u.Upload(context.Background(), session); err == nil {
+			t.Fatalf("Upload() attempt %d succeeded, want it to fail while the network is \"down\"", i)
+		}
+	}
+	if backend.registerCallCount() == 0 {
+		t.Fatal("register-chunk was never called during the simulated outage")
+	}
+	if backend.confirmCallCount() != 0 {
+		t.Fatalf("confirm-chunk called %d times during the outage, want 0", backend.confirmCallCount())
+	}
+
+	// "Network restored."
+	backend.failRegisterWithStatus = 0
+	if err := u.Upload(context.Background(), session); err != nil {
+		t.Fatalf("Upload() after recovery error = %v", err)
+	}
+
+	if backend.confirmCallCount() != 1 {
+		t.Fatalf("confirm-chunk called %d times after recovery, want exactly 1 (no duplicate chunk)", backend.confirmCallCount())
+	}
+	if len(backend.objects) != 1 {
+		t.Fatalf("got %d uploaded objects, want 1", len(backend.objects))
+	}
+	for _, compressed := range backend.objects {
+		got := decompress(t, compressed)
+		if string(got) != content {
+			t.Errorf("rebuilt content = %q, want %q", got, content)
+		}
 	}
 }
 

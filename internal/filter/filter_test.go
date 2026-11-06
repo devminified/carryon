@@ -253,6 +253,33 @@ func TestFilterReturnsErrorOnTransientLookupFailure(t *testing.T) {
 	}
 }
 
+func TestFilterClassifiesA401LookupFailureAsFatal(t *testing.T) {
+	// CO-112: a match-project failure that isn't the "not registered"/
+	// "not a member" 404/403 cases Filter already handles gracefully —
+	// specifically a 401, meaning the caller's token itself was rejected
+	// — must reach Agent as agent.ErrFatal, not an ordinary retryable
+	// error, so a session stuck like this gets marked blocked instead of
+	// backing off forever.
+	dir := t.TempDir()
+	initRepo(t, dir)
+	addRemote(t, dir, "origin", "git@github.com:devminified/acme-api.git")
+
+	unauthorizedErr := &api.Error{StatusCode: http.StatusUnauthorized, Code: "unauthorized", Message: "token rejected"}
+	inner := &spyUploader{}
+	f := New(Config{
+		Inner:        inner,
+		MatchProject: func(context.Context, string) (*api.MatchProjectResult, error) { return nil, unauthorizedErr },
+	})
+
+	err := f.Upload(context.Background(), agent.Session{ID: "s1", Cwd: dir})
+	if !errors.Is(err, agent.ErrFatal) {
+		t.Errorf("Upload() error = %v, want it classified as agent.ErrFatal", err)
+	}
+	if inner.callCount() != 0 {
+		t.Errorf("Inner.Upload called %d times, want 0", inner.callCount())
+	}
+}
+
 func TestFilterCacheHitMakesNoNetworkCall(t *testing.T) {
 	dir := t.TempDir()
 	initRepo(t, dir)
