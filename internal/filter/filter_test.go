@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -251,6 +252,57 @@ func TestFilterReturnsErrorOnTransientLookupFailure(t *testing.T) {
 	if inner.callCount() != 0 {
 		t.Errorf("Inner.Upload called %d times, want 0", inner.callCount())
 	}
+}
+
+func TestFilterWritesSkippedFileOnceAndIncludesEveryUnregisteredRemote(t *testing.T) {
+	dir1 := t.TempDir()
+	initRepo(t, dir1)
+	addRemote(t, dir1, "origin", "git@github.com:devminified/repo-one.git")
+	dir2 := t.TempDir()
+	initRepo(t, dir2)
+	addRemote(t, dir2, "origin", "git@github.com:devminified/repo-two.git")
+
+	skippedPath := filepath.Join(t.TempDir(), "skipped-repos.json")
+	f := New(Config{
+		Inner:        &spyUploader{},
+		MatchProject: func(context.Context, string) (*api.MatchProjectResult, error) { return nil, notFoundErr() },
+		SkippedPath:  skippedPath,
+	})
+
+	for i := 0; i < 3; i++ { // repeated uploads of the same two remotes must not duplicate entries
+		if err := f.Upload(context.Background(), agent.Session{ID: "s1", Cwd: dir1}); err != nil {
+			t.Fatalf("Upload(dir1) #%d error = %v", i, err)
+		}
+		if err := f.Upload(context.Background(), agent.Session{ID: "s2", Cwd: dir2}); err != nil {
+			t.Fatalf("Upload(dir2) #%d error = %v", i, err)
+		}
+	}
+
+	got, err := LoadSkipped(skippedPath)
+	if err != nil {
+		t.Fatalf("LoadSkipped() error = %v", err)
+	}
+	want := []string{"github.com/devminified/repo-one", "github.com/devminified/repo-two"}
+	if !slices.Equal(got.Repos, want) {
+		t.Errorf("Repos = %v, want %v", got.Repos, want)
+	}
+}
+
+func TestFilterSkippedFileIsANoOpWhenSkippedPathIsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	addRemote(t, dir, "origin", "git@github.com:devminified/acme-api.git")
+
+	f := New(Config{
+		Inner:        &spyUploader{},
+		MatchProject: func(context.Context, string) (*api.MatchProjectResult, error) { return nil, notFoundErr() },
+	})
+
+	if err := f.Upload(context.Background(), agent.Session{ID: "s1", Cwd: dir}); err != nil {
+		t.Fatalf("Upload() error = %v, want nil", err)
+	}
+	// No assertion beyond "this doesn't panic or error" — SkippedPath
+	// being empty must behave exactly like it did before CO-113.
 }
 
 func TestFilterClassifiesA401LookupFailureAsFatal(t *testing.T) {

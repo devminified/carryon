@@ -15,10 +15,6 @@ func notImplementedCmd(use, short string) *cobra.Command {
 	}
 }
 
-func newStatusCmd() *cobra.Command {
-	return notImplementedCmd("status", "Show login, agent, and session status (CO-113)")
-}
-
 func newLsCmd() *cobra.Command {
 	return notImplementedCmd("ls", "List the sessions you can see (CO-204)")
 }

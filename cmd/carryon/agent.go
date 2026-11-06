@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"sync"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/devminified/carryon/internal/auth"
 	"github.com/devminified/carryon/internal/config"
 	"github.com/devminified/carryon/internal/filter"
+	"github.com/devminified/carryon/internal/logfile"
 	"github.com/devminified/carryon/internal/service"
 	"github.com/devminified/carryon/internal/upload"
 	kservice "github.com/kardianos/service"
@@ -90,8 +92,9 @@ func (l *lazyAPI) resolve() (*api.Client, *auth.Provider, error) {
 // the *only* way to be notified of a stop at all (see service package doc
 // comment).
 type agentProgram struct {
-	cancel context.CancelFunc
-	done   chan error
+	cancel    context.CancelFunc
+	done      chan error
+	logWriter *logfile.Writer
 }
 
 func (p *agentProgram) Start(kservice.Service) error {
@@ -103,6 +106,17 @@ func (p *agentProgram) Start(kservice.Service) error {
 	if err != nil {
 		return fmt.Errorf("agent: %w", err)
 	}
+
+	// CO-113: structured JSON logs, daily rotation (7 kept) — `carryon
+	// logs` reads this file. Every slog.* call anywhere in this process
+	// goes through it from here on, including the default Warn calls
+	// internal/agent.Config.logf falls back to.
+	logWriter, err := logfile.New(filepath.Join(carryonDir, "logs"), "agent")
+	if err != nil {
+		return fmt.Errorf("agent: %w", err)
+	}
+	p.logWriter = logWriter
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logWriter, nil)))
 
 	lazy := &lazyAPI{}
 	realUploader, err := upload.New(upload.Config{
@@ -116,11 +130,14 @@ func (p *agentProgram) Start(kservice.Service) error {
 	uploader := filter.New(filter.Config{
 		Inner:        realUploader,
 		MatchProject: lazy.matchProject,
+		SkippedPath:  filepath.Join(carryonDir, "skipped-repos.json"),
 	})
 
 	a, err := agent.New(agent.Config{
 		QueuePath:  filepath.Join(carryonDir, "queue.jsonl"),
 		CursorPath: filepath.Join(carryonDir, "agent-cursor.json"),
+		StatusPath: filepath.Join(carryonDir, "agent-status.json"),
+		Version:    version,
 		Uploader:   uploader,
 	})
 	if err != nil {
@@ -133,7 +150,11 @@ func (p *agentProgram) Start(kservice.Service) error {
 
 func (p *agentProgram) Stop(kservice.Service) error {
 	p.cancel()
-	return <-p.done
+	err := <-p.done
+	if p.logWriter != nil {
+		_ = p.logWriter.Close()
+	}
+	return err
 }
 
 func newAgentCmd() *cobra.Command {

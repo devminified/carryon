@@ -31,6 +31,8 @@ carryon/
 │   ├── project/                        git root and remote normalization, registry
 │   ├── filter/                         wraps an agent.Uploader, skipping sessions outside a registered project (CO-108)
 │   ├── api/                            Edge Function client (register-session, get-manifest, …)
+│   ├── status/                         `carryon status`'s Report/Gather/Render (CO-113) — reads agent/filter's own status files
+│   ├── logfile/                        daily-rotating JSON log writer (CO-113), 7 kept — what `carryon logs` tails
 │   └── service/                        service install per OS (launchd / systemd / Windows Service)
 │
 ├── supabase/

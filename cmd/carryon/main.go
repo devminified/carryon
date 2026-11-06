@@ -58,6 +58,7 @@ func newRootCmd() *cobra.Command {
 		newHookCmd(),
 		newAgentCmd(),
 		newStatusCmd(),
+		newLogsCmd(),
 		newLsCmd(),
 		newPullCmd(),
 		newExportCmd(),
