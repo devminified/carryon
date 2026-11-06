@@ -23,8 +23,23 @@ import (
 // queueEvent is one line of ~/.carryon/queue.jsonl, written by
 // internal/hook.
 type queueEvent struct {
-	SessionID string `json:"session_id"`
-	Event     string `json:"event"`
+	SessionID      string `json:"session_id"`
+	TranscriptPath string `json:"transcript_path"`
+	Cwd            string `json:"cwd"`
+	Event          string `json:"event"`
+}
+
+// Session is what Agent passes to Uploader.Upload: everything a real
+// uploader needs about a session without having to re-derive it from the
+// event stream itself (internal/filter's project lookup, CO-108, needs
+// Cwd; internal/reader's pointer tracking, CO-109, needs TranscriptPath).
+// Cwd and TranscriptPath are a session's *most recently seen* values —
+// Claude Code doesn't change either mid-session in practice, but Agent
+// doesn't assume that; it just reports the latest it has.
+type Session struct {
+	ID             string
+	Cwd            string
+	TranscriptPath string
 }
 
 // Uploader uploads whatever's pending for one session. Upload must
@@ -32,7 +47,7 @@ type queueEvent struct {
 // again for the same session if a previous call failed or raced with a
 // newer event — retries are safe, writes are idempotent (I3).
 type Uploader interface {
-	Upload(ctx context.Context, sessionID string) error
+	Upload(ctx context.Context, session Session) error
 }
 
 // Config configures an Agent. QueuePath, CursorPath and Uploader are
@@ -97,6 +112,8 @@ type sessionSchedule struct {
 	final            bool      // a SessionEnd has been seen and not yet confirmed covered
 	uploading        bool      // an upload is currently in flight for this session
 	dueAt            time.Time // zero means "no upload currently scheduled"
+	cwd              string    // most recently seen cwd for this session
+	transcriptPath   string    // most recently seen transcript_path for this session
 }
 
 type uploadResult struct {
@@ -200,6 +217,12 @@ func (a *Agent) readNew() error {
 			a.sessions[ev.SessionID] = s
 		}
 		s.lastSeenPos = a.readPos
+		if ev.Cwd != "" {
+			s.cwd = ev.Cwd
+		}
+		if ev.TranscriptPath != "" {
+			s.transcriptPath = ev.TranscriptPath
+		}
 
 		if ev.Event == "SessionEnd" {
 			s.final = true
@@ -231,18 +254,19 @@ func (a *Agent) dispatchDue(ctx context.Context, wg *sync.WaitGroup) {
 
 		s.uploading = true
 		through := s.lastSeenPos
+		session := Session{ID: id, Cwd: s.cwd, TranscriptPath: s.transcriptPath}
 
 		wg.Add(1)
-		go func(sessionID string, dispatchedThrough int64) {
+		go func(session Session, dispatchedThrough int64) {
 			defer wg.Done()
 			defer func() { <-a.sem }()
 
-			err := a.cfg.Uploader.Upload(ctx, sessionID)
+			err := a.cfg.Uploader.Upload(ctx, session)
 			select {
-			case a.results <- uploadResult{sessionID: sessionID, dispatchedThrough: dispatchedThrough, err: err}:
+			case a.results <- uploadResult{sessionID: session.ID, dispatchedThrough: dispatchedThrough, err: err}:
 			case <-ctx.Done():
 			}
-		}(id, through)
+		}(session, through)
 	}
 }
 

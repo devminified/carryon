@@ -29,6 +29,7 @@ carryon/
 │   ├── pull/                           manifest fetch, download, verify, decompress, rewrite, place, launch
 │   ├── claudepath/                     ~/.claude path encoding per OS
 │   ├── project/                        git root and remote normalization, registry
+│   ├── filter/                         wraps an agent.Uploader, skipping sessions outside a registered project (CO-108)
 │   ├── api/                            Edge Function client (register-session, get-manifest, …)
 │   └── service/                        service install per OS (launchd / systemd / Windows Service)
 │

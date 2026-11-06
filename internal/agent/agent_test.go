@@ -28,7 +28,7 @@ func newCountingUploader() *countingUploader {
 	return &countingUploader{calls: map[string]int{}}
 }
 
-func (u *countingUploader) Upload(ctx context.Context, sessionID string) error {
+func (u *countingUploader) Upload(ctx context.Context, session Session) error {
 	n := atomic.AddInt32(&u.inFlight, 1)
 	defer atomic.AddInt32(&u.inFlight, -1)
 	for {
@@ -39,10 +39,10 @@ func (u *countingUploader) Upload(ctx context.Context, sessionID string) error {
 	}
 
 	u.mu.Lock()
-	u.calls[sessionID]++
-	shouldFail := u.failed[sessionID] < u.failTimes
+	u.calls[session.ID]++
+	shouldFail := u.failed[session.ID] < u.failTimes
 	if shouldFail {
-		u.failed[sessionID]++
+		u.failed[session.ID]++
 	}
 	u.mu.Unlock()
 
