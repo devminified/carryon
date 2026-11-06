@@ -18,7 +18,8 @@ carryon/
 │   ├── config/                         ~/.carryon/config.toml (api_url, anon_key) — loaded before anything else
 │   ├── auth/                           shared token provider (CO-103): login/logout, PKCE, keyring, refresh
 │   ├── hook/                           stdin JSON (session_id, transcript_path, cwd) → queue append
-│   ├── agent/                          daemon loop, debounce, scheduler (kardianos/service)
+│   ├── install/                        merges Carryon's hooks into ~/.claude/settings.json (CO-106), backup/restore
+│   ├── agent/                          daemon loop, debounce, scheduler
 │   ├── queue/                          append-only queue file and compaction
 │   ├── state/                          per-session pointer files (last uploaded byte offset)
 │   ├── reader/                         incremental JSONL reader
