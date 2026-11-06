@@ -43,11 +43,17 @@ type queueEvent struct {
 // confirms which project the session belongs to (CO-110's register-chunk
 // needs it). An inner Uploader must never be reachable except through
 // Filter, so it can trust ProjectID is always set by the time it sees one.
+//
+// Final is true when this dispatch is (at least partially) covering a
+// SessionEnd event Agent has seen for this session and not yet confirmed
+// uploaded — CO-111's real Uploader (internal/upload) uses it to call
+// end-session only once this upload itself has succeeded, never before.
 type Session struct {
 	ID             string
 	Cwd            string
 	TranscriptPath string
 	ProjectID      string
+	Final          bool
 }
 
 // Uploader uploads whatever's pending for one session. Upload must
@@ -262,7 +268,7 @@ func (a *Agent) dispatchDue(ctx context.Context, wg *sync.WaitGroup) {
 
 		s.uploading = true
 		through := s.lastSeenPos
-		session := Session{ID: id, Cwd: s.cwd, TranscriptPath: s.transcriptPath}
+		session := Session{ID: id, Cwd: s.cwd, TranscriptPath: s.transcriptPath, Final: s.final}
 
 		wg.Add(1)
 		go func(session Session, dispatchedThrough int64) {

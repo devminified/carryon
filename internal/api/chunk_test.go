@@ -24,14 +24,18 @@ func TestRegisterChunkSuccess(t *testing.T) {
 
 	c := NewClient(srv.URL, "anon-key")
 	got, err := c.RegisterChunk(context.Background(), "access-token", RegisterChunkInput{
-		SessionID:   "s1",
-		ProjectID:   "p1",
-		OriginalCwd: "/repo",
-		Seq:         0,
-		ByteStart:   0,
-		ByteEnd:     100,
-		SHA256:      "abc123",
-		Size:        100,
+		SessionID:         "s1",
+		ProjectID:         "p1",
+		OriginalCwd:       "/repo",
+		Machine:           "alis-macbook",
+		Branch:            "main",
+		HeadSHA:           "deadbeef",
+		ClaudeCodeVersion: "1.2.3",
+		Seq:               0,
+		ByteStart:         0,
+		ByteEnd:           100,
+		SHA256:            "abc123",
+		Size:              100,
 	})
 	if err != nil {
 		t.Fatalf("RegisterChunk() error = %v", err)
@@ -43,11 +47,40 @@ func TestRegisterChunkSuccess(t *testing.T) {
 	if gotBody["sessionId"] != "s1" || gotBody["projectId"] != "p1" {
 		t.Errorf("request body = %+v", gotBody)
 	}
+	if gotBody["machine"] != "alis-macbook" || gotBody["branch"] != "main" ||
+		gotBody["headSha"] != "deadbeef" || gotBody["claudeCodeVersion"] != "1.2.3" {
+		t.Errorf("request body missing CO-111 metadata fields: %+v", gotBody)
+	}
 	if got.UploadToken != "sometoken" {
 		t.Errorf("UploadToken = %q", got.UploadToken)
 	}
 	if got.ObjectKey != "p1/u1/s1/chunk-0.jsonl.zst" {
 		t.Errorf("ObjectKey = %q", got.ObjectKey)
+	}
+}
+
+func TestRegisterChunkOmitsEmptyMetadataFields(t *testing.T) {
+	var gotBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(RegisterChunkResult{})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "anon-key")
+	_, err := c.RegisterChunk(context.Background(), "access-token", RegisterChunkInput{
+		SessionID: "s1",
+		ProjectID: "p1",
+	})
+	if err != nil {
+		t.Fatalf("RegisterChunk() error = %v", err)
+	}
+
+	for _, field := range []string{"machine", "branch", "headSha", "claudeCodeVersion"} {
+		if _, present := gotBody[field]; present {
+			t.Errorf("request body has %q = %v, want it omitted when gathering failed", field, gotBody[field])
+		}
 	}
 }
 

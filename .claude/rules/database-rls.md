@@ -15,7 +15,7 @@ A project **is** the tenant boundary here: there's no separate organization/`ten
 | --- | --- | --- |
 | `projects` | `id` | one row per registered repo; `git_remote` unique |
 | `project_members` | `(project_id, user_id)` | `role` is `viewer` / `resumer` / `admin`, mirrored from GitHub teams (CO-303) |
-| `sessions` | `id` | `id` is Claude Code's own `session_id`; `parent_session_id` set on a pulled fork |
+| `sessions` | `id` | `id` is Claude Code's own `session_id`; `parent_session_id` set on a pulled fork; `ended_reason` (`'explicit'` \| `'idle'`, added by CO-111's migration) distinguishes a real `SessionEnd` from the idle sweep below |
 | `session_chunks` | `(session_id, stream_id, seq)` | append-only, grows forever within a session; `stream_id` is `'main'` for the session's own transcript or a subagent's `agent_id` for a child stream (CO-109/CO-110 — added by a later migration than CO-102's original `(session_id, seq)`, once a real subagent chunk would otherwise have collided with the main stream's `seq` numbering) |
 | `code_snapshots` | `(session_id, seq)` | `wip_ref` (hidden git ref) or `object_key` (bundle fallback, CO-202) |
 | `audit_log` | `id bigserial` | append-only; RLS blocks `DELETE` for everyone but the DB owner |
@@ -23,6 +23,13 @@ A project **is** the tenant boundary here: there's no separate organization/`ten
 Indexes (CO-102): `sessions(project_id, last_activity_at desc)`, `sessions(user_id)`, `session_chunks(session_id, stream_id, seq)` (via the primary key).
 
 **Not part of the current build plan:** `tenant_id`, partitioning, `session_manifests`/compaction, `leases`, and `outbox` are all Doc §"Scaling to millions of users" (Tier 2/3) concerns — real, but deliberately out of scope until a ticket actually calls for them (CLAUDE.md: "No speculative scale"). Don't add a `tenant_id` column or a leading-key convention pre-emptively; if a future ticket introduces multi-org tenancy, it'll say so and this file gets updated then, not before.
+
+## Scheduled jobs that are pure SQL, not an Edge Function
+
+CO-111's idle-session sweep (a session with no activity for 12 hours gets `status = 'ended', ended_reason = 'idle'`) is a `pg_cron` job calling a plain SQL function directly — `end_idle_sessions()` — not an Edge Function, because the whole state transition is a single `UPDATE` with no Storage/API call involved (see `.claude/rules/edge-functions.md`'s "no queue/outbox" pattern: this needs even less than an Edge Function). Two things any similar future job must get right, both already done here:
+
+- **`revoke execute on function … from public`** right after creating it. Postgres grants `EXECUTE` on a new function to `PUBLIC` by default, which would otherwise let `anon`/`authenticated` trigger it over PostgREST at `/rest/v1/rpc/<function>` — a scheduled job's SQL is an implementation detail, not an API surface. Verified locally: after the revoke, `information_schema.routine_privileges` lists only `postgres`.
+- **`security definer` + `set search_path = public`**, same as every other `SECURITY DEFINER` function in this file.
 
 ## RLS policies
 

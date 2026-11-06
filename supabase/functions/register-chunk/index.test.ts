@@ -14,6 +14,8 @@ function fakeDeps(opts: {
   sessionUpsert?: { error?: any };
   // deno-lint-ignore no-explicit-any
   signedUrl?: { data?: any; error?: any };
+  // deno-lint-ignore no-explicit-any
+  onSessionUpsert?: (row: any) => void;
 }): Deps {
   return {
     requireUser: () => Promise.resolve(opts.user as never),
@@ -36,8 +38,11 @@ function fakeDeps(opts: {
           }
           if (table === "sessions") {
             return {
-              upsert: () =>
-                Promise.resolve(opts.sessionUpsert ?? { error: null }),
+              // deno-lint-ignore no-explicit-any
+              upsert: (row: any) => {
+                opts.onSessionUpsert?.(row);
+                return Promise.resolve(opts.sessionUpsert ?? { error: null });
+              },
             };
           }
           throw new Error(`unexpected table ${table}`);
@@ -153,6 +158,43 @@ Deno.test("upserts the session and returns a signed upload token", async () => {
     body.objectKey,
     "22222222-2222-4222-8222-222222222222/u1/11111111-1111-4111-8111-111111111111/main/chunk-0.jsonl.zst",
   );
+});
+
+Deno.test("passes machine/branch/headSha/claudeCodeVersion through to the session upsert", async () => {
+  // deno-lint-ignore no-explicit-any
+  let upserted: any;
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    member: { data: { role: "resumer" }, error: null },
+    onSessionUpsert: (row) => {
+      upserted = row;
+    },
+  });
+
+  const res = await handle(
+    req(validBody({
+      machine: "alis-macbook",
+      branch: "main",
+      headSha: "a".repeat(40),
+      claudeCodeVersion: "1.2.3",
+    })),
+    deps,
+  );
+  assertEquals(res.status, 200);
+  assertEquals(upserted.machine, "alis-macbook");
+  assertEquals(upserted.branch, "main");
+  assertEquals(upserted.head_sha, "a".repeat(40));
+  assertEquals(upserted.claude_code_version, "1.2.3");
+});
+
+Deno.test("CO-111 fields are optional — their absence doesn't fail registration", async () => {
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    member: { data: { role: "resumer" }, error: null },
+  });
+
+  const res = await handle(req(validBody()), deps);
+  assertEquals(res.status, 200);
 });
 
 Deno.test("surfaces a session upsert failure as 500", async () => {

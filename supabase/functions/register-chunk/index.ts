@@ -1,9 +1,11 @@
 // CO-110: the agent calls this before uploading one compressed chunk. It
 // checks the caller is a member of the session's project, upserts the
-// sessions row on the first chunk for a given session_id (CO-111 owns
-// enriching it further — machine/branch/head_sha/claude_code_version,
-// last_activity_at and total_bytes on every chunk), and returns a signed
-// Storage upload URL for the chunk's object key.
+// sessions row on the first chunk for a given session_id — including
+// CO-111's machine/branch/head_sha/claude_code_version, gathered on the
+// laptop since this function can't exec git or read the machine's own
+// hostname — and returns a signed Storage upload URL for the chunk's
+// object key. confirm-chunk (CO-111) owns last_activity_at/total_bytes/
+// status on every confirmed chunk.
 //
 // Service role for the writes (CO-102: until CO-302's RLS policies land),
 // but identity and membership are still enforced here from the caller's
@@ -34,6 +36,14 @@ const Input = z.object({
   // "main" for the session's own transcript, or a subagent's agent_id for
   // one of its child streams (CO-109) — see _shared/chunks.ts.
   streamId: z.string().min(1).max(200),
+  // CO-111 session-identifying fields, gathered on the laptop — optional
+  // because gathering any of them is best-effort there (no git repo
+  // for head_sha/branch, "claude" not on PATH for the version), and a
+  // missing one must never block the chunk upload itself.
+  machine: z.string().max(255).optional(),
+  branch: z.string().max(255).optional(),
+  headSha: z.string().max(64).optional(),
+  claudeCodeVersion: z.string().max(64).optional(),
   seq: z.number().int().nonnegative(),
   byteStart: z.number().int().nonnegative(),
   byteEnd: z.number().int().positive(),
@@ -96,10 +106,10 @@ export async function handle(
     return errorResponse(403, "forbidden");
   }
 
-  // Insert-if-missing only — CO-111 owns updating last_activity_at and
-  // total_bytes on every chunk, and enriching machine/branch/head_sha/
-  // claude_code_version. This just makes sure the row exists so
-  // session_chunks' foreign key has something to point at.
+  // Insert-if-missing only (ignoreDuplicates) — a session's identifying
+  // fields are set once, on its first chunk, and never overwritten by a
+  // later one. confirm-chunk (CO-111) owns the fields that genuinely
+  // change over a session's life: last_activity_at, total_bytes, status.
   const { error: sessionErr } = await admin
     .from("sessions")
     .upsert(
@@ -108,6 +118,10 @@ export async function handle(
         project_id: input.projectId,
         user_id: user.id,
         original_cwd: input.originalCwd,
+        machine: input.machine,
+        branch: input.branch,
+        head_sha: input.headSha,
+        claude_code_version: input.claudeCodeVersion,
       },
       { onConflict: "id", ignoreDuplicates: true },
     );

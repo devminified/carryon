@@ -55,6 +55,23 @@ func ResolveRemote(ctx context.Context, cwd string) (string, error) {
 	return NormalizeRemote(raw)
 }
 
+// CurrentBranch returns the current branch name for the repository
+// containing cwd (CO-111 — one of the agent-derived fields register-chunk
+// stores on a session's first chunk, since the server has no way to exec
+// git itself). Returns "HEAD" for a detached HEAD, matching `git branch
+// --show-current`'s fallback behavior for `rev-parse --abbrev-ref HEAD`.
+// Returns an error if cwd isn't inside a git repository.
+func CurrentBranch(ctx context.Context, cwd string) (string, error) {
+	return gitOutput(ctx, cwd, "rev-parse", "--abbrev-ref", "HEAD")
+}
+
+// HeadSHA returns the current commit SHA for the repository containing
+// cwd (CO-111, same rationale as CurrentBranch). Returns an error if cwd
+// isn't inside a git repository or has no commits yet.
+func HeadSHA(ctx context.Context, cwd string) (string, error) {
+	return gitOutput(ctx, cwd, "rev-parse", "HEAD")
+}
+
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
 	defer cancel()
