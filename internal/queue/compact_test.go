@@ -1,4 +1,4 @@
-package agent
+package queue
 
 import (
 	"fmt"
@@ -13,12 +13,12 @@ import (
 func TestCompactDropsEverythingBeforeKeepFrom(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "queue.jsonl")
 	content := `{"session_id":"s1"}` + "\n" + `{"session_id":"s2"}` + "\n" + `{"session_id":"s3"}` + "\n"
-	write(t, path, content)
+	writeFile(t, path, content)
 	keepFrom := int64(strings.Index(content, `{"session_id":"s2"}`))
 
-	removed, err := compact(path, keepFrom)
+	removed, err := Compact(path, keepFrom)
 	if err != nil {
-		t.Fatalf("compact() error = %v", err)
+		t.Fatalf("Compact() error = %v", err)
 	}
 	if removed != keepFrom {
 		t.Errorf("removed = %d, want %d", removed, keepFrom)
@@ -37,11 +37,11 @@ func TestCompactDropsEverythingBeforeKeepFrom(t *testing.T) {
 func TestCompactZeroKeepFromIsANoOp(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "queue.jsonl")
 	content := `{"session_id":"s1"}` + "\n"
-	write(t, path, content)
+	writeFile(t, path, content)
 
-	removed, err := compact(path, 0)
+	removed, err := Compact(path, 0)
 	if err != nil {
-		t.Fatalf("compact() error = %v", err)
+		t.Fatalf("Compact() error = %v", err)
 	}
 	if removed != 0 {
 		t.Errorf("removed = %d, want 0", removed)
@@ -55,9 +55,9 @@ func TestCompactZeroKeepFromIsANoOp(t *testing.T) {
 func TestCompactMissingFileIsSafe(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "queue.jsonl")
 
-	removed, err := compact(path, 10)
+	removed, err := Compact(path, 10)
 	if err != nil {
-		t.Fatalf("compact() on a missing file error = %v", err)
+		t.Fatalf("Compact() on a missing file error = %v", err)
 	}
 	if removed != 0 {
 		t.Errorf("removed = %d, want 0", removed)
@@ -65,19 +65,25 @@ func TestCompactMissingFileIsSafe(t *testing.T) {
 }
 
 // TestCompactNeverLosesAWriteConcurrentWithItself is the key safety
-// property: a write that happens strictly *after* compact's keepFrom
-// snapshot was taken — i.e., concurrently with compact's own internal
-// steal-reset-retry loop — must never be lost, even though compact is
+// property: a write that happens strictly *after* Compact's keepFrom
+// snapshot was taken — i.e., concurrently with Compact's own internal
+// steal-reset-retry loop — must never be lost, even though Compact is
 // simultaneously dropping everything *before* that snapshot. (Dropping
 // the pre-snapshot content isn't data loss — that's compaction's entire
-// job; see compact's doc comment for the one, pathological, documented
-// exception for writes concurrent with compact that this test doesn't
+// job; see Compact's doc comment for the one, pathological, documented
+// exception for writes concurrent with Compact that this test doesn't
 // close.)
+//
+// Writers use Append (not a hand-rolled os.OpenFile) specifically so this
+// exercises the real, shared, platform-specific open path — this is what
+// caught a genuine Windows-only bug in CI (Go's os.OpenFile never grants
+// FILE_SHARE_DELETE there, which Compact's rename-based approach depends
+// on) that a POSIX-only test run never would have.
 func TestCompactNeverLosesAWriteConcurrentWithItself(t *testing.T) {
 	const trials = 30
 	for trial := 0; trial < trials; trial++ {
 		path := filepath.Join(t.TempDir(), "queue.jsonl")
-		write(t, path, "line-before\n")
+		writeFile(t, path, "line-before\n")
 		keepFrom := int64(len("line-before\n"))
 
 		const concurrentWriters = 6
@@ -86,24 +92,20 @@ func TestCompactNeverLosesAWriteConcurrentWithItself(t *testing.T) {
 			wg.Add(1)
 			go func(writer int) {
 				defer wg.Done()
-				line := fmt.Sprintf(`{"session_id":"during-%d"}`+"\n", writer)
-				f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304,G302 -- test fixture, mirrors internal/hook's own append pattern
-				if err != nil {
-					t.Errorf("writer %d: open: %v", writer, err)
-					return
+				line := fmt.Sprintf(`{"session_id":"during-%d"}`, writer)
+				if err := Append(path, []byte(line)); err != nil {
+					t.Errorf("writer %d: Append: %v", writer, err)
 				}
-				_, _ = f.WriteString(line)
-				_ = f.Close()
 			}(w)
 		}
 
-		if _, err := compact(path, keepFrom); err != nil {
-			t.Fatalf("trial %d: compact() error = %v", trial, err)
+		if _, err := Compact(path, keepFrom); err != nil {
+			t.Fatalf("trial %d: Compact() error = %v", trial, err)
 		}
 		wg.Wait()
 
-		// A straggler writer could still be mid-open/write when compact
-		// returns; give it a moment, matching the grace period compact
+		// A straggler writer could still be mid-open/write when Compact
+		// returns; give it a moment, matching the grace period Compact
 		// itself uses between steals.
 		time.Sleep(compactGracePeriod)
 
@@ -119,7 +121,7 @@ func TestCompactNeverLosesAWriteConcurrentWithItself(t *testing.T) {
 		for w := 0; w < concurrentWriters; w++ {
 			want := fmt.Sprintf(`{"session_id":"during-%d"}`, w)
 			if !strings.Contains(got, want) {
-				t.Errorf("trial %d: %q (written concurrently with compact) was lost — final content: %q", trial, want, got)
+				t.Errorf("trial %d: %q (written concurrently with Compact) was lost — final content: %q", trial, want, got)
 			}
 		}
 	}

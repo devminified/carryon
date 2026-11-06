@@ -16,7 +16,16 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/devminified/carryon/internal/queue"
 )
+
+// queueEvent is one line of ~/.carryon/queue.jsonl, written by
+// internal/hook.
+type queueEvent struct {
+	SessionID string `json:"session_id"`
+	Event     string `json:"event"`
+}
 
 // Uploader uploads whatever's pending for one session. Upload must
 // respect ctx cancellation (go-conventions.md) and must be safe to call
@@ -129,8 +138,8 @@ func New(cfg Config) (*Agent, error) {
 // On restart after a crash, Run resumes from the last persisted cursor.
 // If a crash happened between a successful compaction and persisting the
 // rebased cursor, the stale (larger) cursor offset is simply past the
-// now-smaller file's end or otherwise inconsistent; readNewLines resets to
-// offset 0 in that case, which just re-marks some already-caught-up
+// now-smaller file's end or otherwise inconsistent; queue.ReadNew resets
+// to offset 0 in that case, which just re-marks some already-caught-up
 // sessions dirty again — a redundant, harmless re-dispatch (I3), not lost
 // data.
 func (a *Agent) Run(ctx context.Context) error {
@@ -173,7 +182,7 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 func (a *Agent) readNew() error {
-	lines, newOffset, err := readNewLines(a.cfg.QueuePath, a.readPos)
+	lines, newOffset, err := queue.ReadNew(a.cfg.QueuePath, a.readPos)
 	if err != nil {
 		return err
 	}
@@ -290,7 +299,7 @@ func (a *Agent) persistCursor() error {
 }
 
 func (a *Agent) runCompaction() {
-	removed, err := compact(a.cfg.QueuePath, a.watermark())
+	removed, err := queue.Compact(a.cfg.QueuePath, a.watermark())
 	if err != nil || removed == 0 {
 		return
 	}
