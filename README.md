@@ -4,7 +4,7 @@ Capture every Claude Code session on a registered repo, upload it (redacted) to 
 
 See `Overview.md` for the product pitch and 52-ticket build plan, `Devminified Carryon — System Design Document (SDD).md` for the architecture and invariants, and `Carryon-TRD-Tickets.md` for the full ticket descriptions. `CLAUDE.md` and `.claude/rules/` are the binding engineering conventions for this repo.
 
-**Current status:** Phase 1, through `CO-103`. `version`, `login`, and `logout` are implemented; everything else still prints `not implemented` and exits `2`.
+**Current status:** Phase 1, through `CO-113`. `ls`, `pull`, `export`, and `rename` still print `not implemented` and exit `2`; everything else is implemented.
 
 ## Quick start
 
@@ -31,12 +31,15 @@ anon_key = "sb_publishable_..."        # from `supabase status` or the project's
 | Command | Status | Ticket |
 | --- | --- | --- |
 | `carryon version` | implemented | CO-101 |
+| `carryon admin project add` | implemented | CO-104 |
 | `carryon login` | implemented | CO-103 |
 | `carryon logout` | implemented | CO-103 |
-| `carryon install` | not implemented | CO-106 |
-| `carryon hook` | not implemented | CO-105 |
-| `carryon agent` | not implemented | CO-107 |
-| `carryon status` | not implemented | CO-113 |
+| `carryon hook` | implemented | CO-105 |
+| `carryon install` | implemented | CO-106 |
+| `carryon uninstall` | implemented | CO-106 |
+| `carryon agent` | implemented | CO-107 |
+| `carryon status` | implemented | CO-113 |
+| `carryon logs` | implemented | CO-113 |
 | `carryon ls` | not implemented | CO-204 |
 | `carryon pull` | not implemented | CO-211 |
 | `carryon export` | not implemented | CO-211 |

@@ -79,6 +79,14 @@ type Config struct {
 	// CursorPath persists the tailing watermark
 	// (~/.carryon/agent-cursor.json in production).
 	CursorPath string
+	// StatusPath, if set, is where Agent persists a live status snapshot
+	// on every poll tick (~/.carryon/agent-status.json in production;
+	// see status.go) for a separate `carryon status` invocation (CO-113)
+	// to read. Optional — skipped entirely if empty.
+	StatusPath string
+	// Version is recorded in every status snapshot (CO-113); normally
+	// cmd/carryon's own build-time version string.
+	Version string
 	// Uploader is called at most once per session per UploadInterval,
 	// plus immediately on that session's SessionEnd event.
 	Uploader Uploader
@@ -152,10 +160,11 @@ type sessionSchedule struct {
 	// is what gives it another chance, not a clock.
 	blocked bool
 	// blockedReason is ErrFatal's error text as of the attempt that set
-	// blocked — kept around (cheaply) for whatever CO-113's `carryon
-	// status` ends up needing to show; this ticket doesn't build that
-	// display itself.
+	// blocked — shown by `carryon status` (CO-113) via StatusFile.
 	blockedReason string
+	// lastUploadAt (CO-113) is when this session's most recent
+	// *successful* upload completed — zero means never.
+	lastUploadAt time.Time
 }
 
 type uploadResult struct {
@@ -167,11 +176,12 @@ type uploadResult struct {
 // Agent is the capture agent's scheduling loop. Not safe for concurrent
 // use — Run owns all of its state for the duration of one call.
 type Agent struct {
-	cfg      Config
-	readPos  int64
-	sessions map[string]*sessionSchedule
-	sem      chan struct{}
-	results  chan uploadResult
+	cfg       Config
+	readPos   int64
+	sessions  map[string]*sessionSchedule
+	sem       chan struct{}
+	results   chan uploadResult
+	startedAt time.Time
 }
 
 // New validates cfg and returns an Agent ready for Run.
@@ -212,6 +222,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.sessions = map[string]*sessionSchedule{}
 	a.sem = make(chan struct{}, a.cfg.WorkerPoolSize)
 	a.results = make(chan uploadResult)
+	a.startedAt = a.cfg.now()
 
 	var wg sync.WaitGroup
 
@@ -229,10 +240,12 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-pollTicker.C:
 			_ = a.readNew() // best-effort; readPos only advances on success, so nothing is lost on a transient error
 			a.dispatchDue(ctx, &wg)
+			a.writeStatus() // every tick, not just on change, so UpdatedAt proves the agent is still alive even when idle
 
 		case res := <-a.results:
 			a.handleResult(res)
 			_ = a.persistCursor() // best-effort; in-memory state stays correct either way
+			a.writeStatus()
 
 		case <-compactTicker.C:
 			a.runCompaction()
@@ -345,6 +358,7 @@ func (a *Agent) handleResult(res uploadResult) {
 	s.blocked = false
 	s.blockedReason = ""
 	s.attempt = 0
+	s.lastUploadAt = a.cfg.now()
 
 	if res.dispatchedThrough > s.confirmedThrough {
 		s.confirmedThrough = res.dispatchedThrough

@@ -35,6 +35,11 @@ type Config struct {
 	// CacheTTL is how long a lookup result is cached per canonical
 	// remote. Default 1 hour (CO-108).
 	CacheTTL time.Duration
+	// SkippedPath, if set, is where Filter persists the set of remotes
+	// it has skipped as unregistered (~/.carryon/skipped-repos.json in
+	// production; see status.go) for `carryon status` (CO-113) to read.
+	// Optional — skipped entirely if empty.
+	SkippedPath string
 
 	// logf receives CO-108's exact "Repo ... is not registered with
 	// Carryon" message, once per remote. Defaults to slog.Info; tests
@@ -57,6 +62,7 @@ type Filter struct {
 	inner        agent.Uploader
 	matchProject MatchProjectFunc
 	cacheTTL     time.Duration
+	skippedPath  string
 	logf         func(msg string)
 	now          func() time.Time
 
@@ -90,6 +96,7 @@ func New(cfg Config) *Filter {
 		inner:         cfg.Inner,
 		matchProject:  cfg.MatchProject,
 		cacheTTL:      ttl,
+		skippedPath:   cfg.SkippedPath,
 		logf:          logf,
 		now:           now,
 		cache:         map[string]cacheEntry{},
@@ -160,6 +167,9 @@ func (f *Filter) warnOnce(remote string) {
 	f.mu.Lock()
 	already := f.warnedRemotes[remote]
 	f.warnedRemotes[remote] = true
+	if !already {
+		f.writeSkipped() // under f.mu — see writeSkipped's own doc comment
+	}
 	f.mu.Unlock()
 
 	if !already {
