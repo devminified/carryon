@@ -121,6 +121,7 @@ func (f *Filter) Upload(ctx context.Context, session agent.Session) error {
 		return nil
 	}
 
+	session.ProjectID = match.ProjectID // Session is passed by value — this only affects Inner's copy
 	return f.inner.Upload(ctx, session)
 }
 

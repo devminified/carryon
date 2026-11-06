@@ -142,6 +142,9 @@ func TestFilterUploadsRegisteredProject(t *testing.T) {
 	if inner.callCount() != 1 {
 		t.Errorf("Inner.Upload called %d times, want 1", inner.callCount())
 	}
+	if got := inner.calls[0].ProjectID; got != "p1" {
+		t.Errorf("Inner.Upload received ProjectID = %q, want %q (from the match-project result)", got, "p1")
+	}
 }
 
 func TestFilterNestedSubfolderOfRegisteredRepoUploads(t *testing.T) {

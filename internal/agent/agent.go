@@ -36,10 +36,18 @@ type queueEvent struct {
 // Cwd and TranscriptPath are a session's *most recently seen* values —
 // Claude Code doesn't change either mid-session in practice, but Agent
 // doesn't assume that; it just reports the latest it has.
+//
+// ProjectID is always empty as Agent constructs it — Agent itself has no
+// way to know it. internal/filter populates it on its own copy of Session
+// before calling its inner Uploader, once its match-project lookup
+// confirms which project the session belongs to (CO-110's register-chunk
+// needs it). An inner Uploader must never be reachable except through
+// Filter, so it can trust ProjectID is always set by the time it sees one.
 type Session struct {
 	ID             string
 	Cwd            string
 	TranscriptPath string
+	ProjectID      string
 }
 
 // Uploader uploads whatever's pending for one session. Upload must
