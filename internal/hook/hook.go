@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/devminified/carryon/internal/config"
+	"github.com/devminified/carryon/internal/queue"
 )
 
 // maxStdinBytes caps how much of stdin we read. Claude Code's hook
@@ -110,19 +111,19 @@ func parse(r io.Reader) (input, error) {
 	return in, nil
 }
 
-// appendLine writes one JSON line to ~/.carryon/queue.jsonl with a single
-// O_APPEND write call. A single write under PIPE_BUF (4096 bytes on
-// Linux; Windows' FILE_APPEND_DATA gives the equivalent guarantee for one
-// WriteFile call) is atomic across concurrent writers with no extra
-// locking — this, plus the field caps above keeping every line under that
-// budget, is what lets concurrent `carryon hook` invocations never
-// interleave (CO-105's testing point).
+// appendLine writes one JSON line to ~/.carryon/queue.jsonl via
+// internal/queue.Append — a single write call, atomic across concurrent
+// writers with no extra locking (see Append's doc comment) — this, plus
+// the field caps above keeping every line under its size budget, is what
+// lets concurrent `carryon hook` invocations never interleave (CO-105's
+// testing point). internal/queue also owns the file's compaction
+// (CO-107's agent), so the writer and the compactor agree on the same
+// platform-specific file-sharing semantics.
 func appendLine(e entry) error {
 	line, err := json.Marshal(e)
 	if err != nil {
 		return fmt.Errorf("marshaling queue entry: %w", err)
 	}
-	line = append(line, '\n')
 
 	dir, err := config.Dir()
 	if err != nil {
@@ -130,16 +131,7 @@ func appendLine(e entry) error {
 	}
 	path := filepath.Join(dir, "queue.jsonl")
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- path is our own computed ~/.carryon/queue.jsonl
-	if err != nil {
-		return fmt.Errorf("opening %s: %w", path, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	if _, err := f.Write(line); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-	return nil
+	return queue.Append(path, line)
 }
 
 func logError(err error) {

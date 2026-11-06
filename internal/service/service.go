@@ -1,12 +1,16 @@
-// Package service wraps kardianos/service for CO-106's control operations
-// (Install/Uninstall/Start/Stop/Status). This is launchd on macOS, a
-// systemd user unit on Linux, and a Windows Service — the same package
-// CO-107's `carryon agent` daemon loop will run inside of.
+// Package service wraps kardianos/service: launchd on macOS, a systemd
+// user unit on Linux, and a Windows Service.
 //
-// New's returned Service is for control only: its own service.Interface
-// implementation is a no-op. The OS service manager calls Start/Stop on
-// whatever service.Interface `carryon agent` registers when *it* calls
-// service.Run() (CO-107) — not on anything in this package.
+// It serves two different callers. CO-106's Install/Uninstall are control
+// operations — they pass New a no-op service.Interface, since they never
+// need Start/Stop invoked on themselves. CO-107's `carryon agent` passes
+// New its own service.Interface (wired to internal/agent.Agent) and calls
+// Run() on the result — Run is what actually dispatches the OS service
+// manager's lifecycle to that interface's Start/Stop. This isn't optional
+// on Windows: a plain child process with no service.Interface has no way
+// to receive a graceful stop there (no signal equivalent), so `carryon
+// agent` must go through this path even when the OS service manager, not
+// a developer's terminal, is the one running it (CO-106).
 package service
 
 import (
@@ -29,8 +33,9 @@ func (noopInterface) Stop(kservice.Service) error  { return nil }
 
 // New returns a service descriptor for the Carryon capture agent, pointed
 // at this binary's own path (so Install works wherever `go install` or the
-// release puts it) with "agent" as its sole argument.
-func New() (kservice.Service, error) {
+// release puts it) with "agent" as its sole argument, wired to iface (see
+// the package doc comment for who passes what here).
+func New(iface kservice.Interface) (kservice.Service, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("finding carryon's own executable path: %w", err)
@@ -69,7 +74,7 @@ func New() (kservice.Service, error) {
 		},
 	}
 
-	s, err := kservice.New(noopInterface{}, cfg)
+	s, err := kservice.New(iface, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating service descriptor: %w", err)
 	}
@@ -79,7 +84,7 @@ func New() (kservice.Service, error) {
 // Install registers the service with the OS and starts it. Safe to call
 // when already installed and/or already running (CO-106: idempotent).
 func Install() error {
-	s, err := New()
+	s, err := New(noopInterface{})
 	if err != nil {
 		return err
 	}
@@ -109,7 +114,7 @@ func Install() error {
 // installed (CO-106: `carryon uninstall` reverses install exactly once,
 // then becomes a no-op).
 func Uninstall() error {
-	s, err := New()
+	s, err := New(noopInterface{})
 	if err != nil {
 		return err
 	}
