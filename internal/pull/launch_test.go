@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -124,47 +126,65 @@ func TestNeedsVersionWarning(t *testing.T) {
 	}
 }
 
-// writeFakeClaude writes a tiny script masquerading as the real
-// `claude` CLI: `--version` prints a real-shaped version line, and
-// otherwise it records its argv, cwd, and stdin so the test can assert
-// Launch wired everything correctly, without depending on the real
-// (interactive, heavyweight) Claude Code binary.
-func writeFakeClaude(t *testing.T, recordPath string) string {
+// buildFakeClaude compiles a tiny standalone program masquerading as
+// the real `claude` CLI and returns its path: `--version` prints a
+// real-shaped version line, and otherwise it records its cwd, argv,
+// and stdin to recordPath (baked in as a compile-time constant, since
+// Launch itself controls every argument the real binary is called
+// with) so the test can assert Launch wired everything correctly.
+// Built as a real binary via `go build` rather than a shell/batch
+// script: a bare .cmd file isn't reliably directly executable as a
+// child process on Windows the way a POSIX shell script is, so a
+// compiled binary is the one form that behaves identically everywhere.
+func buildFakeClaude(t *testing.T, recordPath string) string {
 	t.Helper()
 	dir := t.TempDir()
-	if runtime.GOOS == "windows" {
-		script := dir + "\\claude.cmd"
-		content := "@echo off\r\n" +
-			"if \"%1\"==\"--version\" (\r\n" +
-			"  echo 2.1.263 (Claude Code)\r\n" +
-			"  exit /b 0\r\n" +
-			")\r\n" +
-			"> \"" + recordPath + "\" echo %CD%\r\n" +
-			"echo %* >> \"" + recordPath + "\"\r\n" +
-			"more >> \"" + recordPath + "\"\r\n"
-		if err := os.WriteFile(script, []byte(content), 0o700); err != nil {
-			t.Fatalf("writing fake claude.cmd: %v", err)
-		}
-		return script
+	srcPath := filepath.Join(dir, "main.go")
+	src := fmt.Sprintf(`package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+)
+
+const recordPath = %q
+
+func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "--version" {
+		fmt.Println("2.1.263 (Claude Code)")
+		return
+	}
+	f, err := os.Create(recordPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer f.Close()
+	cwd, _ := os.Getwd()
+	fmt.Fprintln(f, cwd)
+	fmt.Fprintln(f, os.Args[1:])
+	_, _ = io.Copy(f, os.Stdin)
+}
+`, recordPath)
+	if err := os.WriteFile(srcPath, []byte(src), 0o600); err != nil {
+		t.Fatalf("writing fake claude source: %v", err)
 	}
 
-	script := filepath.Join(dir, "claude")
-	content := "#!/bin/sh\n" +
-		"if [ \"$1\" = \"--version\" ]; then\n" +
-		"  echo '2.1.263 (Claude Code)'\n" +
-		"  exit 0\n" +
-		"fi\n" +
-		"pwd > " + recordPath + "\n" +
-		"echo \"$@\" >> " + recordPath + "\n" +
-		"cat >> " + recordPath + "\n"
-	if err := os.WriteFile(script, []byte(content), 0o700); err != nil {
-		t.Fatalf("writing fake claude script: %v", err)
+	exePath := filepath.Join(dir, "fakeclaude")
+	if runtime.GOOS == "windows" {
+		exePath += ".exe"
 	}
-	return script
+	cmd := exec.Command("go", "build", "-o", exePath, srcPath) // #nosec G204 -- fixed go-toolchain invocation, test-only
+	cmd.Env = append(os.Environ(), "GOFLAGS=")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("building fake claude binary: %v\n%s", err, out)
+	}
+	return exePath
 }
 
 func TestLocalClaudeVersionParsesTheRealOutputShape(t *testing.T) {
-	bin := writeFakeClaude(t, filepath.Join(t.TempDir(), "unused"))
+	bin := buildFakeClaude(t, filepath.Join(t.TempDir(), "unused"))
 	got, err := LocalClaudeVersion(context.Background(), bin)
 	if err != nil {
 		t.Fatalf("LocalClaudeVersion() error = %v", err)
@@ -177,7 +197,7 @@ func TestLocalClaudeVersionParsesTheRealOutputShape(t *testing.T) {
 func TestLaunchRunsClaudeWithResumeAndForkSessionInTheWorktree(t *testing.T) {
 	worktree := t.TempDir()
 	record := filepath.Join(t.TempDir(), "record.txt")
-	bin := writeFakeClaude(t, record)
+	bin := buildFakeClaude(t, record)
 
 	var stdout bytes.Buffer
 	err := Launch(context.Background(), LaunchInput{
