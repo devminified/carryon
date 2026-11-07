@@ -2,6 +2,8 @@
 
 The named RPCs: `register-session`, `register-chunk`, `confirm-chunk`, `end-session`, `get-manifest`, `register-snapshot`, `summarize-session`, `rescan`, `sync-github-teams`. One directory per function under `supabase/functions/`.
 
+`sign-snapshot-bundle` (CO-202) joins this list as a narrow exception to "one function per RPC, named up front in the build plan": it exists purely because `register-snapshot`'s git-bundle fallback path needs a signed Storage upload URL before it has anything to register, the same two-phase shape `register-chunk`/`confirm-chunk` already has for chunks. It signs only — `register-snapshot` is still the one function that ever writes a `code_snapshots` row, for both the ref and the bundle path.
+
 ## Contract
 
 ```ts

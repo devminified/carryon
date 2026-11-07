@@ -106,6 +106,51 @@ func pushSnapshot(ctx context.Context, repoDir, remoteName, commitSHA, refName s
 	return err
 }
 
+// bundleTmpRef is a deterministic, Carryon-owned ref name used only for
+// the few seconds it takes to create a fallback bundle — `git bundle
+// create` refuses a bare commit SHA with "Refusing to create empty
+// bundle" (verified against a live repo, not assumed from docs): it
+// needs an actual ref it can name in the bundle's header. Using
+// sessionID keeps it predictable without colliding with any real
+// branch, and it's deleted immediately after (see createBundle).
+func bundleTmpRef(sessionID string) string {
+	return "refs/carryon-tmp/" + sessionID
+}
+
+// createBundle writes a git bundle containing only the objects
+// reachable from commitSHA that aren't already reachable from any of
+// remoteName's remote-tracking refs (CO-202: "bundle size stays
+// proportional to the changed objects, not the whole repo") to a fresh
+// temp file, returning its path and a cleanup func. The temp ref it
+// uses internally is always deleted before this returns, successful or
+// not — it never lingers as a side effect a `git branch`/`git log`
+// would show the developer.
+func createBundle(ctx context.Context, repoDir, commitSHA, remoteName, sessionID string) (path string, cleanup func(), err error) {
+	ref := bundleTmpRef(sessionID)
+	if _, err := runGit(ctx, localGitTimeout, repoDir, nil, "update-ref", ref, commitSHA); err != nil {
+		return "", nil, fmt.Errorf("creating temp ref: %w", err)
+	}
+	defer func() {
+		_, _ = runGit(ctx, localGitTimeout, repoDir, nil, "update-ref", "-d", ref)
+	}()
+
+	f, err := os.CreateTemp("", "carryon-snapshot-bundle-")
+	if err != nil {
+		return "", nil, fmt.Errorf("creating temp bundle file: %w", err)
+	}
+	bundlePath := f.Name()
+	_ = f.Close()
+	if err := os.Remove(bundlePath); err != nil { // git bundle create wants to create the file itself
+		return "", nil, fmt.Errorf("removing placeholder bundle file: %w", err)
+	}
+
+	if _, err := runGit(ctx, localGitTimeout, repoDir, nil, "bundle", "create", bundlePath, ref, "--not", "--remotes="+remoteName); err != nil {
+		return "", nil, fmt.Errorf("creating bundle: %w", err)
+	}
+
+	return bundlePath, func() { _ = os.Remove(bundlePath) }, nil
+}
+
 func indexEnv(indexPath string) []string {
 	return []string{"GIT_INDEX_FILE=" + indexPath}
 }

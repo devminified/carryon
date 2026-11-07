@@ -16,6 +16,8 @@ function fakeDeps(opts: {
   upsert?: { error?: any };
   // deno-lint-ignore no-explicit-any
   onUpsert?: (row: any) => void;
+  // deno-lint-ignore no-explicit-any
+  info?: { data?: any; error?: any };
 }): Deps {
   return {
     requireUser: () => Promise.resolve(opts.user as never),
@@ -29,7 +31,10 @@ function fakeDeps(opts: {
                   maybeSingle: () =>
                     Promise.resolve(
                       opts.session ??
-                        { data: { project_id: "p1" }, error: null },
+                        {
+                          data: { project_id: "p1", user_id: "u1" },
+                          error: null,
+                        },
                     ),
                 }),
               }),
@@ -60,6 +65,17 @@ function fakeDeps(opts: {
             };
           }
           throw new Error(`unexpected table ${table}`);
+        },
+        storage: {
+          from(bucket: string) {
+            if (bucket !== "carryon-sessions") {
+              throw new Error(`unexpected bucket ${bucket}`);
+            }
+            return {
+              info: () =>
+                Promise.resolve(opts.info ?? { data: {}, error: null }),
+            };
+          },
         },
         // deno-lint-ignore no-explicit-any
       }) as any,
@@ -143,6 +159,53 @@ Deno.test("upserts the snapshot row", async () => {
     "refs/carryon/ali/11111111-1111-4111-8111-111111111111",
   );
   assertEquals(upserted.tree_sha, "b".repeat(40));
+});
+
+Deno.test("bundle path: derives object_key from the session's own stored project/user and verifies it exists", async () => {
+  // deno-lint-ignore no-explicit-any
+  let upserted: any;
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    session: { data: { project_id: "p1", user_id: "owner-id" }, error: null },
+    onUpsert: (row) => {
+      upserted = row;
+    },
+  });
+
+  const res = await handle(req(validBody({ wipRef: undefined })), deps);
+  assertEquals(res.status, 200);
+  assertEquals(upserted.wip_ref, null);
+  assertEquals(
+    upserted.object_key,
+    "p1/owner-id/11111111-1111-4111-8111-111111111111/code-0.bundle",
+  );
+});
+
+Deno.test("bundle path: rejects when the bundle object is missing from storage", async () => {
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    info: { data: null, error: { code: "NoSuchKey", message: "not found" } },
+  });
+
+  const res = await handle(req(validBody({ wipRef: undefined })), deps);
+  assertEquals(res.status, 409);
+  const body = await res.json();
+  assertEquals(body.error, "object_missing");
+});
+
+Deno.test("ref path never stores an object_key", async () => {
+  // deno-lint-ignore no-explicit-any
+  let upserted: any;
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    onUpsert: (row) => {
+      upserted = row;
+    },
+  });
+
+  const res = await handle(req(validBody()), deps);
+  assertEquals(res.status, 200);
+  assertEquals(upserted.object_key, null);
 });
 
 Deno.test("retrying the same (session_id, seq) replaces the row instead of erroring (idempotent, NFR-05)", async () => {
