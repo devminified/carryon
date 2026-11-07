@@ -601,13 +601,18 @@ func TestAgentLongOfflineOutageCapsBackoffAndEventuallyDelivers(t *testing.T) {
 
 	for i := 0; i < 50; i++ {
 		before := uploader.count("s1")
-		// 1s was too tight on a loaded/throttled CI runner (observed
-		// flaking twice in a row on GitHub's hosted macOS runner under
-		// -race, never locally) — any one of 50 iterations stalling
-		// past a hair-trigger budget shouldn't fail a test that isn't
-		// actually timing-sensitive; the real assertion is "eventually
-		// fires again after the clock jump," not "within 1s of it."
-		waitFor(t, 5*time.Second, func() bool { return uploader.count("s1") > before })
+		// Widened 1s -> 5s -> 15s: observed failing outright at both 1s
+		// and 5s on GitHub's hosted macOS/Windows runners specifically
+		// (never locally, 10/10 under -race -count=10; GitHub's macOS
+		// runners are well known to be far more CPU-constrained than
+		// Linux ones, and go test's default per-package parallelism
+		// means this real-wall-clock-polling test competes with every
+		// other package's -race-instrumented binary for the same
+		// starved CPU budget). The assertion isn't timing-sensitive —
+		// it's "eventually fires again after the clock jump" — so a
+		// generous ceiling doesn't weaken what this proves; a genuine
+		// deadlock would still fail even at 15s.
+		waitFor(t, 15*time.Second, func() bool { return uploader.count("s1") > before })
 		time.Sleep(2 * time.Millisecond) // let handleResult set the next dueAt
 		// Jump past even the maximum possible jittered delay (cap *
 		// 1.5) — proves the cap holds no matter how long the simulated
@@ -617,7 +622,7 @@ func TestAgentLongOfflineOutageCapsBackoffAndEventuallyDelivers(t *testing.T) {
 
 	// "Network restored" — the 51st attempt succeeds, with no special
 	// recovery step needed beyond the same backoff schedule firing again.
-	waitFor(t, 2*time.Second, func() bool { return uploader.count("s1") >= 51 })
+	waitFor(t, 15*time.Second, func() bool { return uploader.count("s1") >= 51 })
 }
 
 func TestAgentRestartClearsBlockedStateAndRetriesFresh(t *testing.T) {
