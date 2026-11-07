@@ -110,8 +110,8 @@ Requires Go 1.23+.
 | `carryon status` | implemented | CO-113 |
 | `carryon logs` | implemented | CO-113 |
 | `carryon ls` | implemented | CO-204 |
-| `carryon pull` | not implemented | CO-211 |
-| `carryon export` | not implemented | CO-211 |
+| `carryon pull` | implemented | CO-211 |
+| `carryon export` | implemented | CO-211 |
 | `carryon rename` | not implemented | CO-405 |
 
 ## Development

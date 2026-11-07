@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestGetManifestParsesARefSnapshot(t *testing.T) {
@@ -17,9 +18,11 @@ func TestGetManifestParsesARefSnapshot(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"session": map[string]any{
-				"id": "s1", "projectId": "p1", "ownerLogin": "ali",
+				"id": "s1", "projectId": "p1", "projectName": "acme-api",
+				"gitRemote": "github.com/acme/acme-api", "ownerLogin": "ali",
 				"originalCwd": "/Users/ali/acme-api", "branch": "main",
 				"headSha": "a1", "claudeCodeVersion": "2.1.0", "status": "live",
+				"lastActivityAt": "2026-01-01T18:42:00Z",
 			},
 			"chunks": []map[string]any{
 				{"streamId": "main", "seq": 0, "byteStart": 0, "byteEnd": 100, "sha256": "c1", "objectKey": "ok1", "downloadToken": "dt1"},
@@ -46,6 +49,13 @@ func TestGetManifestParsesARefSnapshot(t *testing.T) {
 
 	if got.Session.OwnerLogin != "ali" || got.Session.Branch != "main" {
 		t.Errorf("Session = %+v", got.Session)
+	}
+	if got.Session.ProjectName != "acme-api" || got.Session.GitRemote != "github.com/acme/acme-api" {
+		t.Errorf("Session = %+v, want ProjectName/GitRemote populated", got.Session)
+	}
+	wantLastActivity := time.Date(2026, 1, 1, 18, 42, 0, 0, time.UTC)
+	if !got.Session.LastActivityAt.Equal(wantLastActivity) {
+		t.Errorf("Session.LastActivityAt = %v, want %v", got.Session.LastActivityAt, wantLastActivity)
 	}
 	if len(got.Chunks) != 1 || got.Chunks[0].ObjectKey != "ok1" || got.Chunks[0].DownloadToken != "dt1" {
 		t.Errorf("Chunks = %+v", got.Chunks)

@@ -1,17 +1,28 @@
 package api
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
-// SessionMeta is get-manifest's (CO-203) session metadata.
+// SessionMeta is get-manifest's (CO-203) session metadata. ProjectName,
+// GitRemote and LastActivityAt were added by CO-211, which is the
+// first caller needing them — to locate or clone a local checkout
+// before restoring a worktree, and to render the pre-launch header —
+// rather than a second round trip through list-sessions just for these
+// three columns.
 type SessionMeta struct {
-	ID                string `json:"id"`
-	ProjectID         string `json:"projectId"`
-	OwnerLogin        string `json:"ownerLogin"`
-	OriginalCwd       string `json:"originalCwd"`
-	Branch            string `json:"branch"`
-	HeadSHA           string `json:"headSha"`
-	ClaudeCodeVersion string `json:"claudeCodeVersion"`
-	Status            string `json:"status"`
+	ID                string    `json:"id"`
+	ProjectID         string    `json:"projectId"`
+	ProjectName       string    `json:"projectName"`
+	GitRemote         string    `json:"gitRemote"`
+	OwnerLogin        string    `json:"ownerLogin"`
+	OriginalCwd       string    `json:"originalCwd"`
+	Branch            string    `json:"branch"`
+	HeadSHA           string    `json:"headSha"`
+	ClaudeCodeVersion string    `json:"claudeCodeVersion"`
+	Status            string    `json:"status"`
+	LastActivityAt    time.Time `json:"lastActivityAt"`
 }
 
 // ManifestChunk is one of get-manifest's ordered chunks. ObjectKey and

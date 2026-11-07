@@ -15,14 +15,6 @@ func notImplementedCmd(use, short string) *cobra.Command {
 	}
 }
 
-func newPullCmd() *cobra.Command {
-	return notImplementedCmd("pull", "Pull and resume a session on this machine (CO-211)")
-}
-
-func newExportCmd() *cobra.Command {
-	return notImplementedCmd("export", "Rebuild a session file without placing or launching it (CO-211)")
-}
-
 func newRenameCmd() *cobra.Command {
 	return notImplementedCmd("rename", "Rename a session (CO-405)")
 }

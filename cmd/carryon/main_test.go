@@ -11,13 +11,13 @@ var allSubcommands = []string{
 }
 
 // login, logout (CO-103), hook (CO-105), install/uninstall (CO-106),
-// status/logs (CO-113), and ls (CO-204) are implemented; everything else
-// still scaffolds the CLI surface for a later ticket. agent (CO-107) is a
-// special case — not a notImplementedCmd stub (see agent.go) because
-// CO-106 installs and starts it as a real OS service, so it can't exit
-// immediately.
+// status/logs (CO-113), ls (CO-204), and pull/export (CO-211) are
+// implemented; everything else still scaffolds the CLI surface for a
+// later ticket. agent (CO-107) is a special case — not a
+// notImplementedCmd stub (see agent.go) because CO-106 installs and
+// starts it as a real OS service, so it can't exit immediately.
 var stubSubcommands = []string{
-	"pull", "export", "rename",
+	"rename",
 }
 
 func TestRootCommandListsAllSubcommands(t *testing.T) {
@@ -63,7 +63,7 @@ func TestRunExitCode(t *testing.T) {
 	orig := os.Args
 	defer func() { os.Args = orig }()
 
-	os.Args = []string{"carryon", "pull"}
+	os.Args = []string{"carryon", "rename"}
 	if code := run(); code != 2 {
 		t.Errorf("run() with a stub subcommand = %d, want 2", code)
 	}
