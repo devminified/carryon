@@ -98,6 +98,11 @@ type ConfirmChunkInput struct {
 	ByteStart int64
 	ByteEnd   int64
 	SHA256    string
+	// Redactions is how many individual replacements internal/redact
+	// (CO-301) applied to this chunk before compression. ByteStart/
+	// ByteEnd still refer to the *original* (pre-redaction) file; the
+	// chunk's own uploaded bytes are the redacted ones.
+	Redactions int
 }
 
 // ConfirmChunk calls the confirm-chunk Edge Function (CO-110), which
@@ -107,12 +112,13 @@ type ConfirmChunkInput struct {
 // retry confirm-chunk.
 func (c *Client) ConfirmChunk(ctx context.Context, accessToken string, in ConfirmChunkInput) error {
 	body := map[string]any{
-		"sessionId": in.SessionID,
-		"streamId":  in.StreamID,
-		"seq":       in.Seq,
-		"byteStart": in.ByteStart,
-		"byteEnd":   in.ByteEnd,
-		"sha256":    in.SHA256,
+		"sessionId":  in.SessionID,
+		"streamId":   in.StreamID,
+		"seq":        in.Seq,
+		"byteStart":  in.ByteStart,
+		"byteEnd":    in.ByteEnd,
+		"sha256":     in.SHA256,
+		"redactions": in.Redactions,
 	}
 	return c.post(ctx, "confirm-chunk", accessToken, body, nil)
 }

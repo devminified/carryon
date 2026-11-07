@@ -116,12 +116,18 @@ Deno.test("rejects byteEnd <= byteStart", async () => {
   assertEquals(res.status, 400);
 });
 
-Deno.test("rejects size that doesn't match byteEnd - byteStart", async () => {
+Deno.test("accepts size independent of byteEnd - byteStart (CO-301: redaction changes length)", async () => {
+  // byteStart/byteEnd describe the original file's range; size is the
+  // actual uploaded (possibly redacted) object's length — these are no
+  // longer required to match once anything was redacted.
   const res = await handle(
     req(validBody({ size: 999 })),
-    fakeDeps({ user: fakeUser() }),
+    fakeDeps({
+      user: fakeUser(),
+      member: { data: { role: "resumer" }, error: null },
+    }),
   );
-  assertEquals(res.status, 400);
+  assertEquals(res.status, 200);
 });
 
 Deno.test("rejects a caller who isn't a project member", async () => {

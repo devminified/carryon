@@ -51,9 +51,12 @@ const Input = z.object({
   size: z.number().int().positive(),
 }).refine((v) => v.byteEnd > v.byteStart, {
   message: "byteEnd must be greater than byteStart",
-}).refine((v) => v.size === v.byteEnd - v.byteStart, {
-  message: "size must equal byteEnd - byteStart",
 });
+// CO-301: size is no longer required to equal byteEnd - byteStart.
+// byteStart/byteEnd describe the *original* (pre-redaction) file's byte
+// range; redaction can change a line's length, so size — the actual
+// uploaded, compressed object's input length — is independent of that
+// range once anything was actually redacted. See redaction.md.
 
 // Deps exists so tests can inject fakes for the two Supabase calls
 // without a live instance — see index.test.ts.

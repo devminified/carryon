@@ -19,6 +19,7 @@ import (
 	"github.com/devminified/carryon/internal/agent"
 	"github.com/devminified/carryon/internal/api"
 	"github.com/devminified/carryon/internal/reader"
+	"github.com/devminified/carryon/internal/redact"
 	"github.com/devminified/carryon/internal/state"
 )
 
@@ -69,15 +70,22 @@ type Config struct {
 	// HTTPClient is used for the PUT to each chunk's signed upload URL.
 	// Defaults to a 60-second-timeout client.
 	HTTPClient *http.Client
+	// RedactConfigSource returns the redact.Config to use for the next
+	// batch of lines — a function, not a bare redact.Config, so a
+	// future get-config (CO-301) refresh can change the active rule
+	// set/denylist without requiring a new Uploader. Defaults to
+	// redact.DefaultConfig if nil.
+	RedactConfigSource func() redact.Config
 }
 
 // Uploader implements agent.Uploader (CO-107) for real.
 type Uploader struct {
-	clientSource ClientSource
-	tokenSource  TokenSource
-	stateDir     string
-	snapshotter  Snapshotter
-	httpClient   *http.Client
+	clientSource       ClientSource
+	tokenSource        TokenSource
+	stateDir           string
+	snapshotter        Snapshotter
+	httpClient         *http.Client
+	redactConfigSource func() redact.Config
 }
 
 // New validates cfg and returns an Uploader.
@@ -95,12 +103,17 @@ func New(cfg Config) (*Uploader, error) {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 60 * time.Second}
 	}
+	redactConfigSource := cfg.RedactConfigSource
+	if redactConfigSource == nil {
+		redactConfigSource = redact.DefaultConfig
+	}
 	return &Uploader{
-		clientSource: cfg.ClientSource,
-		tokenSource:  cfg.TokenSource,
-		stateDir:     cfg.StateDir,
-		snapshotter:  cfg.Snapshotter,
-		httpClient:   httpClient,
+		clientSource:       cfg.ClientSource,
+		tokenSource:        cfg.TokenSource,
+		stateDir:           cfg.StateDir,
+		snapshotter:        cfg.Snapshotter,
+		httpClient:         httpClient,
+		redactConfigSource: redactConfigSource,
 	}, nil
 }
 
@@ -169,9 +182,19 @@ func (u *Uploader) Upload(ctx context.Context, session agent.Session) error {
 }
 
 // uploadStream reads whatever's new for one stream (the main transcript,
-// or one subagent) and uploads it as one or more chunks, persisting state
+// or one subagent), redacts it (CO-301 — before compression, per
+// redaction.md), and uploads it as one or more chunks, persisting state
 // after each confirmed chunk so a crash mid-stream only re-uploads what
 // wasn't yet confirmed (I3) — never the whole thing again.
+//
+// byteStart/byteEnd (and state.Pointer.Offset, which must keep meaning
+// the same thing on the next call) always refer to the *original*
+// file's byte positions — redaction changes line lengths, so a chunk's
+// uploaded bytes and its corresponding original-file byte range are
+// tracked separately, lines accumulated together: the 8MB split is
+// decided by the running *redacted* size (what's actually about to be
+// uploaded), always cut at a line boundary so the correspondence stays
+// well-defined chunk to chunk.
 func (u *Uploader) uploadStream(ctx context.Context, session agent.Session, streamID, stateKey, path string, meta sessionMetadata) error {
 	prior, err := state.Load(u.stateDir, stateKey)
 	if err != nil {
@@ -192,22 +215,29 @@ func (u *Uploader) uploadStream(ctx context.Context, session agent.Session, stre
 	pos := next.Offset - int64(len(data))
 	seq := prior.NextSeq
 
-	for len(data) > 0 {
-		n := len(data)
-		if n > maxUncompressedChunkBytes {
-			n = maxUncompressedChunkBytes
+	pending, err := state.LoadRedactPending(u.stateDir, stateKey)
+	if err != nil {
+		return fmt.Errorf("loading redact state for %s: %w", stateKey, err)
+	}
+	redactor := redact.NewRedactor(u.redactConfigSource())
+	redactor.SetPending(pending)
+
+	var pieceOrigLen, pieceRedacted bytes.Buffer
+	pieceStart := pos
+	pieceRedactions := 0
+
+	flush := func() error {
+		if pieceRedacted.Len() == 0 {
+			return nil
 		}
-		piece := data[:n]
-		data = data[n:]
+		byteStart := pieceStart
+		byteEnd := pieceStart + int64(pieceOrigLen.Len())
 
-		byteStart := pos
-		byteEnd := pos + int64(n)
-		pos = byteEnd
-
-		if err := u.uploadChunk(ctx, session, streamID, seq, byteStart, byteEnd, piece, meta); err != nil {
+		if err := u.uploadChunk(ctx, session, streamID, seq, byteStart, byteEnd, pieceRedacted.Bytes(), pieceRedactions, meta); err != nil {
 			return fmt.Errorf("chunk seq %d: %w", seq, err)
 		}
 		seq++
+		pieceStart = byteEnd
 
 		confirmed := state.Pointer{
 			Offset:   byteEnd,
@@ -218,8 +248,52 @@ func (u *Uploader) uploadStream(ctx context.Context, session agent.Session, stre
 		if err := state.Save(u.stateDir, stateKey, confirmed); err != nil {
 			return fmt.Errorf("saving state after chunk seq %d: %w", seq-1, err)
 		}
+		if err := state.SaveRedactPending(u.stateDir, stateKey, redactor.Pending()); err != nil {
+			return fmt.Errorf("saving redact state after chunk seq %d: %w", seq-1, err)
+		}
+
+		pieceOrigLen.Reset()
+		pieceRedacted.Reset()
+		pieceRedactions = 0
+		return nil
 	}
-	return nil
+
+	remaining := data
+	for len(remaining) > 0 {
+		nl := bytes.IndexByte(remaining, '\n')
+		var rawLine, lineWithNL []byte
+		if nl < 0 {
+			// reader.Read's own contract guarantees data ends at a
+			// complete line — this shouldn't happen, but if it ever
+			// did, treating the remainder as one final unterminated
+			// line is safer than silently dropping it.
+			rawLine, lineWithNL = remaining, remaining
+			remaining = nil
+		} else {
+			rawLine, lineWithNL = remaining[:nl], remaining[:nl+1]
+			remaining = remaining[nl+1:]
+		}
+
+		redactedLine, n, _ := redactor.RedactLine(rawLine)
+
+		// Flush before adding, not after — a piece already holding
+		// data that would cross the limit once this line joins it
+		// gets uploaded first, so no single flushed piece ever exceeds
+		// maxUncompressedChunkBytes by more than one line's worth
+		// (unavoidable for a single line already over the limit on
+		// its own — never split mid-line).
+		if pieceRedacted.Len() > 0 && pieceRedacted.Len()+len(redactedLine)+1 > maxUncompressedChunkBytes {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+
+		pieceOrigLen.Write(lineWithNL)
+		pieceRedacted.Write(redactedLine)
+		pieceRedacted.WriteByte('\n')
+		pieceRedactions += n
+	}
+	return flush()
 }
 
 // uploadChunk compresses, hashes, registers, PUTs, and confirms one
@@ -227,7 +301,7 @@ func (u *Uploader) uploadStream(ctx context.Context, session agent.Session, stre
 // retries once — CO-110's "an expired signed URL is re-requested
 // automatically" testing point. Broader retry/backoff policy belongs to
 // CO-112, not here.
-func (u *Uploader) uploadChunk(ctx context.Context, session agent.Session, streamID string, seq int, byteStart, byteEnd int64, data []byte, meta sessionMetadata) error {
+func (u *Uploader) uploadChunk(ctx context.Context, session agent.Session, streamID string, seq int, byteStart, byteEnd int64, data []byte, redactions int, meta sessionMetadata) error {
 	sum := sha256.Sum256(data)
 	sha256Hex := hex.EncodeToString(sum[:])
 
@@ -258,7 +332,12 @@ func (u *Uploader) uploadChunk(ctx context.Context, session agent.Session, strea
 		ByteStart:         byteStart,
 		ByteEnd:           byteEnd,
 		SHA256:            sha256Hex,
-		Size:              byteEnd - byteStart,
+		// Size is data's own (uploaded, redacted) length, not
+		// byteEnd-byteStart (the *original* file's range) — CO-301:
+		// redaction can change a line's length, so these two are no
+		// longer required to match (register-chunk's Zod schema
+		// dropped that refinement for exactly this reason).
+		Size: int64(len(data)),
 	}
 	reg, err := client.RegisterChunk(ctx, token, regInput)
 	if err != nil {
@@ -276,12 +355,13 @@ func (u *Uploader) uploadChunk(ctx context.Context, session agent.Session, strea
 	}
 
 	if err := client.ConfirmChunk(ctx, token, api.ConfirmChunkInput{
-		SessionID: session.ID,
-		StreamID:  streamID,
-		Seq:       seq,
-		ByteStart: byteStart,
-		ByteEnd:   byteEnd,
-		SHA256:    sha256Hex,
+		SessionID:  session.ID,
+		StreamID:   streamID,
+		Seq:        seq,
+		ByteStart:  byteStart,
+		ByteEnd:    byteEnd,
+		SHA256:     sha256Hex,
+		Redactions: redactions,
 	}); err != nil {
 		return fmt.Errorf("confirming: %w", err)
 	}

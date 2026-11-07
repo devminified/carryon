@@ -39,6 +39,13 @@ const Input = z.object({
   byteStart: z.number().int().nonnegative(),
   byteEnd: z.number().int().positive(),
   sha256: z.string().length(64),
+  // CO-301: how many redactions internal/redact applied to this chunk
+  // before compression — byteStart/byteEnd still refer to the
+  // *original* file; the chunk's own bytes are the redacted ones.
+  // Optional (defaults to 0), same reasoning as register-chunk's own
+  // optional CO-111 fields: a caller predating CO-301 shouldn't be
+  // forced to send it.
+  redactions: z.number().int().nonnegative().optional(),
 }).refine((v) => v.byteEnd > v.byteStart, {
   message: "byteEnd must be greater than byteStart",
 });
@@ -137,6 +144,7 @@ export async function handle(
         byte_end: input.byteEnd,
         object_key: objectKey,
         sha256: input.sha256,
+        redactions: input.redactions ?? 0,
       },
       { onConflict: "session_id,stream_id,seq" },
     );

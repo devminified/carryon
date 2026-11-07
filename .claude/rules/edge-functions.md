@@ -8,6 +8,8 @@ The named RPCs: `register-session`, `register-chunk`, `confirm-chunk`, `end-sess
 
 `register-fork` (CO-208) is the last of these — it creates the `sessions` row for a pulled/forked session (`parent_session_id` set, `status: 'live'`, owned by the puller). The puller's identity always comes from their own JWT, never a client-supplied field — the same reasoning as every other identity-sensitive write in this codebase. The session-ID rewrite inside the pulled transcript's own file happens entirely on the puller's laptop (`internal/pull.RewriteSessionIDFile`); this function is only the server-side bookkeeping so the fork's own agent has a row to upload into once the puller resumes.
 
+`get-config` (CO-301) is the same kind of named exception: it lets `internal/redact`'s laptop-side rule set be narrowed (disable a rule by ID) or its path denylist extended, from the server, without a new binary release. No request body, and no project/role check — every authenticated user gets the same global config, since there's no per-project redaction config in the current build plan. It reads the single `redaction_config` row with the service-role client (same stopgap every function in this phase uses ahead of CO-302's real RLS) and returns `{disabledRuleIds, denylistAdditions}` — see `.claude/rules/redaction.md` for why there's deliberately no way to supply a raw pattern through it.
+
 ## Contract
 
 ```ts

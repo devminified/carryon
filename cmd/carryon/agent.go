@@ -14,6 +14,7 @@ import (
 	"github.com/devminified/carryon/internal/config"
 	"github.com/devminified/carryon/internal/filter"
 	"github.com/devminified/carryon/internal/logfile"
+	"github.com/devminified/carryon/internal/redact"
 	"github.com/devminified/carryon/internal/service"
 	"github.com/devminified/carryon/internal/snapshot"
 	"github.com/devminified/carryon/internal/upload"
@@ -42,12 +43,37 @@ type lazyAPI struct {
 	// per githubLoginCacheTTL, not on every snapshot attempt.
 	cachedLogin    string
 	loginFetchedAt time.Time
+
+	// cachedRedactConfig/redactConfigAt/redactConfigFetched cache
+	// get-config's (CO-301) response the same way — re-checked at most
+	// once per redactConfigCacheTTL, not on every chunk. Until the first
+	// successful fetch, and on any fetch failure thereafter,
+	// redactConfig falls back to redact.DefaultConfig() (or the last
+	// known-good merged config) rather than ever returning an empty/
+	// weakened rule set — I5 means RedactConfigSource must never cause
+	// a chunk to upload with fewer protections than the built-in
+	// defaults just because the server was briefly unreachable.
+	cachedRedactConfig  redact.Config
+	redactConfigAt      time.Time
+	redactConfigFetched bool
 }
 
 // githubLoginCacheTTL mirrors internal/upload's claude-version cache
 // window — a developer's GitHub login practically never changes within
 // an agent process's lifetime.
 const githubLoginCacheTTL = 24 * time.Hour
+
+// redactConfigCacheTTL is the same caching window applied to get-config
+// (CO-301) — the server's disabled-rule/denylist-addition config
+// changes rarely enough that fetching it on every upload chunk would be
+// pure waste.
+const redactConfigCacheTTL = 24 * time.Hour
+
+// redactConfigFetchTimeout bounds the get-config network call —
+// RedactConfigSource (upload.Config) has no error return and must
+// return promptly every time, so a slow or unreachable server can't be
+// allowed to stall an upload; it just falls back below.
+const redactConfigFetchTimeout = 5 * time.Second
 
 func (l *lazyAPI) matchProject(ctx context.Context, canonicalRemote string) (*api.MatchProjectResult, error) {
 	client, provider, err := l.resolve()
@@ -105,6 +131,59 @@ func (l *lazyAPI) githubLogin(ctx context.Context) (string, error) {
 	l.loginFetchedAt = time.Now()
 	l.mu.Unlock()
 	return user.UserName, nil
+}
+
+// redactConfig matches upload.Config's RedactConfigSource shape — no
+// context, no error. It fetches get-config at most once per
+// redactConfigCacheTTL, merging the result onto redact.DefaultConfig()
+// via redact.ApplyServerConfig. Any failure along the way (not yet
+// logged in, network error, server error) falls back to the last
+// known-good merged config, or plain redact.DefaultConfig() if there
+// hasn't been one yet — never to a weaker, empty rule set.
+func (l *lazyAPI) redactConfig() redact.Config {
+	l.mu.Lock()
+	if l.redactConfigFetched && time.Since(l.redactConfigAt) < redactConfigCacheTTL {
+		cfg := l.cachedRedactConfig
+		l.mu.Unlock()
+		return cfg
+	}
+	l.mu.Unlock()
+
+	client, provider, err := l.resolve()
+	if err != nil {
+		return l.fallbackRedactConfig()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), redactConfigFetchTimeout)
+	defer cancel()
+
+	token, err := provider.AccessToken(ctx)
+	if err != nil {
+		return l.fallbackRedactConfig()
+	}
+
+	serverCfg, err := client.GetConfig(ctx, token)
+	if err != nil {
+		return l.fallbackRedactConfig()
+	}
+
+	merged := redact.ApplyServerConfig(redact.DefaultConfig(), serverCfg.DisabledRuleIDs, serverCfg.DenylistAdditions)
+
+	l.mu.Lock()
+	l.cachedRedactConfig = merged
+	l.redactConfigAt = time.Now()
+	l.redactConfigFetched = true
+	l.mu.Unlock()
+	return merged
+}
+
+func (l *lazyAPI) fallbackRedactConfig() redact.Config {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.redactConfigFetched {
+		return l.cachedRedactConfig
+	}
+	return redact.DefaultConfig()
 }
 
 func (l *lazyAPI) resolve() (*api.Client, *auth.Provider, error) {
@@ -175,10 +254,11 @@ func (p *agentProgram) Start(kservice.Service) error {
 	}
 
 	realUploader, err := upload.New(upload.Config{
-		ClientSource: lazy.client,
-		TokenSource:  lazy.accessToken,
-		StateDir:     filepath.Join(carryonDir, "state"),
-		Snapshotter:  snap,
+		ClientSource:       lazy.client,
+		TokenSource:        lazy.accessToken,
+		StateDir:           filepath.Join(carryonDir, "state"),
+		Snapshotter:        snap,
+		RedactConfigSource: lazy.redactConfig,
 	})
 	if err != nil {
 		return fmt.Errorf("agent: %w", err)

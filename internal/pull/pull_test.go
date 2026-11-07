@@ -211,6 +211,45 @@ func testRebuildByteIdentical(t *testing.T, totalSize, chunkSize int) {
 	}
 }
 
+// TestRebuildAcceptsAChunkWhoseDecompressedLengthDiffersFromItsByteRange
+// is CO-301's regression test: byteStart/byteEnd describe the ORIGINAL
+// (pre-redaction) file's positions, while the actual uploaded/
+// downloaded bytes are the redacted content — a "[REDACTED:id]"
+// placeholder is rarely the same length as the secret it replaced, so
+// the two numbers legitimately diverge. Rebuild must still succeed as
+// long as the SHA256 matches; it must not re-derive or check a
+// decompressed-length-equals-byte-range invariant that no longer holds.
+func TestRebuildAcceptsAChunkWhoseDecompressedLengthDiffersFromItsByteRange(t *testing.T) {
+	server := newFakeChunkServer(t)
+	redacted := []byte(`{"content":"[REDACTED:aws-access-key-id]"}` + "\n")
+	server.set("main-0", redacted)
+
+	chunks := []api.ManifestChunk{{
+		StreamID: mainStreamID, Seq: 0,
+		// The original line (before AKIA...EXAMPLE got replaced by the
+		// shorter placeholder) was longer than the redacted bytes
+		// actually stored — a real, expected mismatch now, not a bug.
+		ByteStart: 0, ByteEnd: int64(len(redacted)) + 20,
+		SHA256: sha256Hex(redacted), ObjectKey: "main-0", DownloadToken: "main-0",
+	}}
+
+	manifest := &api.Manifest{Chunks: chunks}
+	destDir := t.TempDir()
+
+	result, err := Rebuild(context.Background(), server.client(), manifest, destDir, DefaultConfig())
+	if err != nil {
+		t.Fatalf("Rebuild() error = %v, want success (SHA256 matches; byte-range length mismatch is expected post-redaction)", err)
+	}
+
+	got, err := os.ReadFile(result.MainFile)
+	if err != nil {
+		t.Fatalf("reading rebuilt file: %v", err)
+	}
+	if string(got) != string(redacted) {
+		t.Fatalf("rebuilt file = %q, want %q", got, redacted)
+	}
+}
+
 func TestRebuildWritesSubagentStreamsUnderSubagentsDir(t *testing.T) {
 	server := newFakeChunkServer(t)
 	mainData := randomBytes(t, 2048)
