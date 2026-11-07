@@ -17,7 +17,7 @@ A project **is** the tenant boundary here: there's no separate organization/`ten
 | `project_members` | `(project_id, user_id)` | `role` is `viewer` / `resumer` / `admin`, mirrored from GitHub teams (CO-303) |
 | `sessions` | `id` | `id` is Claude Code's own `session_id`; `parent_session_id` set on a pulled fork; `ended_reason` (`'explicit'` \| `'idle'`, added by CO-111's migration) distinguishes a real `SessionEnd` from the idle sweep below |
 | `session_chunks` | `(session_id, stream_id, seq)` | append-only, grows forever within a session; `stream_id` is `'main'` for the session's own transcript or a subagent's `agent_id` for a child stream (CO-109/CO-110 — added by a later migration than CO-102's original `(session_id, seq)`, once a real subagent chunk would otherwise have collided with the main stream's `seq` numbering) |
-| `code_snapshots` | `(session_id, seq)` | `wip_ref` (hidden git ref) or `object_key` (bundle fallback, CO-202) |
+| `code_snapshots` | `(session_id, seq)` | `wip_ref` (hidden git ref) or `object_key` (bundle fallback, CO-202); `tree_sha` (added by a later migration than CO-102's original columns, CO-201) is the pushed commit's tree object, letting a retry compare against what's already registered without re-deriving it server-side |
 | `audit_log` | `id bigserial` | append-only; RLS blocks `DELETE` for everyone but the DB owner |
 
 Indexes (CO-102): `sessions(project_id, last_activity_at desc)`, `sessions(user_id)`, `session_chunks(session_id, stream_id, seq)` (via the primary key).

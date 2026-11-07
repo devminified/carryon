@@ -30,8 +30,6 @@ supabase/.temp/
 .supabase/
 
 # --- Env / secrets ---
-.env
-.env.*
 !.env.example
 !.env.local.example
 *.pem
@@ -54,3 +52,4 @@ test/fixtures/qa-evidence/
 
 # --- Release tooling ---
 *.sig
+config.bat
