@@ -4,6 +4,8 @@ The named RPCs: `register-session`, `register-chunk`, `confirm-chunk`, `end-sess
 
 `sign-snapshot-bundle` (CO-202) joins this list as a narrow exception to "one function per RPC, named up front in the build plan": it exists purely because `register-snapshot`'s git-bundle fallback path needs a signed Storage upload URL before it has anything to register, the same two-phase shape `register-chunk`/`confirm-chunk` already has for chunks. It signs only — `register-snapshot` is still the one function that ever writes a `code_snapshots` row, for both the ref and the bundle path.
 
+`list-sessions` (CO-204) isn't in that original list either — it exists because `carryon ls` needs to list every session the caller can see across all of their projects, and there's no RLS to lean on yet (CO-302) that would let a plain PostgREST read do that safely. It checks `project_members` directly, the same stopgap every function in this phase uses, and resolves each row's owner GitHub login via `admin.auth.admin.getUserById` (the `auth` schema isn't exposed to PostgREST — see `auth.md`) rather than a SQL join.
+
 ## Contract
 
 ```ts

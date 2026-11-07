@@ -15,10 +15,6 @@ func notImplementedCmd(use, short string) *cobra.Command {
 	}
 }
 
-func newLsCmd() *cobra.Command {
-	return notImplementedCmd("ls", "List the sessions you can see (CO-204)")
-}
-
 func newPullCmd() *cobra.Command {
 	return notImplementedCmd("pull", "Pull and resume a session on this machine (CO-211)")
 }

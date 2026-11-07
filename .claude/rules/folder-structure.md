@@ -45,6 +45,7 @@ carryon/
 │       ├── confirm-chunk/
 │       ├── end-session/
 │       ├── get-manifest/
+│       ├── list-sessions/             backs `carryon ls` (CO-204) — not in Doc's original RPC list, see edge-functions.md
 │       ├── register-snapshot/
 │       ├── sign-snapshot-bundle/       signs the upload URL for register-snapshot's git-bundle fallback (CO-202)
 │       ├── summarize-session/
