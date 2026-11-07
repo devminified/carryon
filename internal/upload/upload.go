@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -44,14 +45,27 @@ type TokenSource func(ctx context.Context) (string, error)
 // before the agent service even starts.
 type ClientSource func() (*api.Client, error)
 
+// Snapshotter takes a non-destructive git snapshot of a session's
+// working tree (CO-201) after its chunk upload succeeds.
+// *snapshot.Snapshotter satisfies this.
+type Snapshotter interface {
+	MaybeSnapshot(ctx context.Context, sessionID, cwd string, final bool) error
+}
+
 // Config configures an Uploader. ClientSource, TokenSource and StateDir
-// are required.
+// are required; Snapshotter is optional (CO-201's snapshot step is
+// skipped entirely if nil, matching this package's own ClientSource/
+// TokenSource lazy-resolution pattern rather than requiring every
+// caller to wire one up).
 type Config struct {
 	ClientSource ClientSource
 	TokenSource  TokenSource
 	// StateDir is ~/.carryon/state — internal/state's pointer files live
 	// here, one per stream.
 	StateDir string
+	// Snapshotter, if set, is asked to take a working-tree snapshot
+	// after the main transcript stream uploads successfully.
+	Snapshotter Snapshotter
 	// HTTPClient is used for the PUT to each chunk's signed upload URL.
 	// Defaults to a 60-second-timeout client.
 	HTTPClient *http.Client
@@ -62,6 +76,7 @@ type Uploader struct {
 	clientSource ClientSource
 	tokenSource  TokenSource
 	stateDir     string
+	snapshotter  Snapshotter
 	httpClient   *http.Client
 }
 
@@ -84,6 +99,7 @@ func New(cfg Config) (*Uploader, error) {
 		clientSource: cfg.ClientSource,
 		tokenSource:  cfg.TokenSource,
 		stateDir:     cfg.StateDir,
+		snapshotter:  cfg.Snapshotter,
 		httpClient:   httpClient,
 	}, nil
 }
@@ -111,6 +127,18 @@ func (u *Uploader) Upload(ctx context.Context, session agent.Session) error {
 
 	if err := u.uploadStream(ctx, session, mainStreamID, session.ID, session.TranscriptPath, meta); err != nil {
 		return agent.ClassifyError(fmt.Errorf("uploading main transcript: %w", err))
+	}
+
+	if u.snapshotter != nil {
+		if err := u.snapshotter.MaybeSnapshot(ctx, session.ID, session.Cwd, session.Final); err != nil {
+			// Best-effort (CO-201): a snapshot failure — git push
+			// rejected, a network hiccup to GitHub — must never
+			// undermine the transcript capture that already succeeded
+			// above. I1's "never blocks the developer" extends to
+			// this too, so it's logged, not returned as Upload's own
+			// error.
+			slog.Warn(fmt.Sprintf("snapshot for session %s failed: %v", session.ID, err))
+		}
 	}
 
 	subagents, err := reader.Subagents(session.TranscriptPath)

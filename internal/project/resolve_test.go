@@ -122,6 +122,72 @@ func TestResolveRemoteFromNestedSubfolderMatchesToplevel(t *testing.T) {
 	}
 }
 
+func TestRemoteNameUsesOrigin(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	addRemote(t, dir, "origin", "git@github.com:devminified/acme-api.git")
+	addRemote(t, dir, "upstream", "git@github.com:someone-else/acme-api.git")
+
+	got, err := RemoteName(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("RemoteName() error = %v", err)
+	}
+	if got != "origin" {
+		t.Errorf("RemoteName() = %q, want %q", got, "origin")
+	}
+}
+
+func TestRemoteNameFallsBackToFirstRemoteWhenNoOrigin(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	addRemote(t, dir, "upstream", "git@github.com:devminified/acme-api.git")
+
+	got, err := RemoteName(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("RemoteName() error = %v", err)
+	}
+	if got != "upstream" {
+		t.Errorf("RemoteName() = %q, want %q", got, "upstream")
+	}
+}
+
+func TestRemoteNameNoRemotes(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+
+	_, err := RemoteName(context.Background(), dir)
+	if !errors.Is(err, ErrNoRemote) {
+		t.Errorf("RemoteName() error = %v, want ErrNoRemote", err)
+	}
+}
+
+func TestToplevelFromNestedSubfolder(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	nested := filepath.Join(dir, "a", "b")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	got, err := Toplevel(context.Background(), nested)
+	if err != nil {
+		t.Fatalf("Toplevel() error = %v", err)
+	}
+	// macOS temp dirs are often themselves a symlink (e.g. /tmp -> /private/tmp);
+	// resolve both sides the same way before comparing.
+	wantReal, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(dir): %v", err)
+	}
+	gotReal, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(got): %v", err)
+	}
+	if gotReal != wantReal {
+		t.Errorf("Toplevel() = %q, want %q", gotReal, wantReal)
+	}
+}
+
 func TestResolveRemoteEmptyCwd(t *testing.T) {
 	_, err := ResolveRemote(context.Background(), "")
 	if !errors.Is(err, ErrNoRepo) {

@@ -646,6 +646,112 @@ func TestUploadRetriedAcrossMultipleFailedCallsStillRebuildsByteIdentical(t *tes
 	}
 }
 
+type fakeSnapshotter struct {
+	mu    sync.Mutex
+	calls []struct {
+		sessionID, cwd string
+		final          bool
+	}
+	err error
+}
+
+func (f *fakeSnapshotter) MaybeSnapshot(_ context.Context, sessionID, cwd string, final bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, struct {
+		sessionID, cwd string
+		final          bool
+	}{sessionID, cwd, final})
+	return f.err
+}
+
+func (f *fakeSnapshotter) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+func TestUploadCallsSnapshotterAfterMainStreamSucceeds(t *testing.T) {
+	backend := newFakeBackend()
+	srv := backend.server()
+	defer srv.Close()
+
+	snap := &fakeSnapshotter{}
+	client := api.NewClient(srv.URL, "anon-key")
+	u, err := New(Config{
+		ClientSource: func() (*api.Client, error) { return client, nil },
+		TokenSource:  fakeTokenSource,
+		StateDir:     filepath.Join(t.TempDir(), "state"),
+		Snapshotter:  snap,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "s1.jsonl")
+	writeTranscript(t, transcriptPath, `{"line":1}`+"\n")
+
+	session := agent.Session{ID: "s1", Cwd: "/repo", TranscriptPath: transcriptPath, ProjectID: "p1", Final: true}
+	if err := u.Upload(context.Background(), session); err != nil {
+		t.Fatalf("Upload() error = %v", err)
+	}
+
+	if snap.callCount() != 1 {
+		t.Fatalf("MaybeSnapshot called %d times, want 1", snap.callCount())
+	}
+	call := snap.calls[0]
+	if call.sessionID != "s1" || call.cwd != "/repo" || !call.final {
+		t.Errorf("MaybeSnapshot call = %+v, want sessionID=s1 cwd=/repo final=true", call)
+	}
+}
+
+func TestUploadSnapshotFailureDoesNotFailUpload(t *testing.T) {
+	backend := newFakeBackend()
+	srv := backend.server()
+	defer srv.Close()
+
+	snap := &fakeSnapshotter{err: errors.New("push rejected")}
+	client := api.NewClient(srv.URL, "anon-key")
+	u, err := New(Config{
+		ClientSource: func() (*api.Client, error) { return client, nil },
+		TokenSource:  fakeTokenSource,
+		StateDir:     filepath.Join(t.TempDir(), "state"),
+		Snapshotter:  snap,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "s1.jsonl")
+	writeTranscript(t, transcriptPath, `{"line":1}`+"\n")
+
+	session := agent.Session{ID: "s1", TranscriptPath: transcriptPath, ProjectID: "p1"}
+	if err := u.Upload(context.Background(), session); err != nil {
+		t.Errorf("Upload() error = %v, want nil — a snapshot failure must never fail the whole upload", err)
+	}
+	if snap.callCount() != 1 {
+		t.Errorf("MaybeSnapshot called %d times, want 1 (still attempted)", snap.callCount())
+	}
+}
+
+func TestUploadWithNoSnapshotterConfiguredStillSucceeds(t *testing.T) {
+	backend := newFakeBackend()
+	srv := backend.server()
+	defer srv.Close()
+	u := newTestUploader(t, srv) // no Snapshotter set
+
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "s1.jsonl")
+	writeTranscript(t, transcriptPath, `{"line":1}`+"\n")
+
+	session := agent.Session{ID: "s1", TranscriptPath: transcriptPath, ProjectID: "p1"}
+	if err := u.Upload(context.Background(), session); err != nil {
+		t.Fatalf("Upload() error = %v, want nil", err)
+	}
+}
+
 func TestNewValidatesRequiredFields(t *testing.T) {
 	validClientSource := func() (*api.Client, error) { return api.NewClient("http://local", "key"), nil }
 

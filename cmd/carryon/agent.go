@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/devminified/carryon/internal/agent"
 	"github.com/devminified/carryon/internal/api"
@@ -14,6 +15,7 @@ import (
 	"github.com/devminified/carryon/internal/filter"
 	"github.com/devminified/carryon/internal/logfile"
 	"github.com/devminified/carryon/internal/service"
+	"github.com/devminified/carryon/internal/snapshot"
 	"github.com/devminified/carryon/internal/upload"
 	kservice "github.com/kardianos/service"
 	"github.com/spf13/cobra"
@@ -32,7 +34,20 @@ type lazyAPI struct {
 	mu           sync.Mutex
 	cachedClient *api.Client
 	provider     *auth.Provider
+
+	// cachedLogin/loginFetchedAt cache the GitHub login CO-201's
+	// snapshot push needs for its hidden ref name — fetched via a real
+	// network call (GET /auth/v1/user), so it's cached the same way
+	// internal/upload caches claude --version: re-checked at most once
+	// per githubLoginCacheTTL, not on every snapshot attempt.
+	cachedLogin    string
+	loginFetchedAt time.Time
 }
+
+// githubLoginCacheTTL mirrors internal/upload's claude-version cache
+// window — a developer's GitHub login practically never changes within
+// an agent process's lifetime.
+const githubLoginCacheTTL = 24 * time.Hour
 
 func (l *lazyAPI) matchProject(ctx context.Context, canonicalRemote string) (*api.MatchProjectResult, error) {
 	client, provider, err := l.resolve()
@@ -62,6 +77,34 @@ func (l *lazyAPI) accessToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("agent: %w", err)
 	}
 	return provider.AccessToken(ctx)
+}
+
+// githubLogin matches snapshot.CurrentUserFunc — the developer's GitHub
+// login, for CO-201's hidden ref name.
+func (l *lazyAPI) githubLogin(ctx context.Context) (string, error) {
+	_, provider, err := l.resolve()
+	if err != nil {
+		return "", fmt.Errorf("agent: %w", err)
+	}
+
+	l.mu.Lock()
+	if l.cachedLogin != "" && time.Since(l.loginFetchedAt) < githubLoginCacheTTL {
+		login := l.cachedLogin
+		l.mu.Unlock()
+		return login, nil
+	}
+	l.mu.Unlock()
+
+	user, err := provider.CurrentUser(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	l.mu.Lock()
+	l.cachedLogin = user.UserName
+	l.loginFetchedAt = time.Now()
+	l.mu.Unlock()
+	return user.UserName, nil
 }
 
 func (l *lazyAPI) resolve() (*api.Client, *auth.Provider, error) {
@@ -119,10 +162,22 @@ func (p *agentProgram) Start(kservice.Service) error {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(logWriter, nil)))
 
 	lazy := &lazyAPI{}
+
+	snap, err := snapshot.New(snapshot.Config{
+		ClientSource: lazy.client,
+		TokenSource:  lazy.accessToken,
+		CurrentUser:  lazy.githubLogin,
+		StateDir:     filepath.Join(carryonDir, "snapshot-state"),
+	})
+	if err != nil {
+		return fmt.Errorf("agent: %w", err)
+	}
+
 	realUploader, err := upload.New(upload.Config{
 		ClientSource: lazy.client,
 		TokenSource:  lazy.accessToken,
 		StateDir:     filepath.Join(carryonDir, "state"),
+		Snapshotter:  snap,
 	})
 	if err != nil {
 		return fmt.Errorf("agent: %w", err)

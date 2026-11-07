@@ -100,6 +100,29 @@ func TestRenderLagging(t *testing.T) {
 	}
 }
 
+func TestRenderShowsExcludedLargeFilesWarning(t *testing.T) {
+	lastUpload := fixedNow.Add(-12 * time.Second)
+	got := Render(Report{
+		LoggedIn:   true,
+		User:       &UserInfo{Email: "ali@devminified.com"},
+		BackendURL: "http://127.0.0.1:54421",
+		Agent:      AgentInfo{Running: true, Version: "1.2.3", UptimeSeconds: 60},
+		Sessions: []SessionInfo{
+			{
+				SessionID:          "a1b2c3d4-1111-4111-8111-aaaaaaaaaaaa",
+				Project:            "github.com/devminified/acme-api",
+				LastUploadAt:       &lastUpload,
+				BytesBehind:        0,
+				ExcludedLargeFiles: []string{"big.bin", "huge.zip"},
+			},
+		},
+	}, fixedNow)
+
+	if !strings.Contains(got, "2 large file(s) excluded from snapshot") {
+		t.Errorf("Render() missing the excluded-large-files warning:\n%s", got)
+	}
+}
+
 func TestRenderBlocked(t *testing.T) {
 	got := Render(Report{
 		LoggedIn:   true,
