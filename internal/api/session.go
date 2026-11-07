@@ -1,6 +1,9 @@
 package api
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // EndSession calls the end-session Edge Function (CO-111) once the
 // upload covering a session's SessionEnd event has been confirmed. Safe
@@ -9,4 +12,60 @@ import "context"
 func (c *Client) EndSession(ctx context.Context, accessToken, sessionID string) error {
 	body := map[string]string{"sessionId": sessionID}
 	return c.post(ctx, "end-session", accessToken, body, nil)
+}
+
+// ListSessionsInput is list-sessions' (CO-204) optional filters — every
+// field's zero value means "don't filter on this."
+type ListSessionsInput struct {
+	Project string
+	Dev     string
+	Status  string
+	Since   *time.Time
+	// Limit is capped and defaulted server-side if zero; see
+	// list-sessions/index.ts's DEFAULT_LIMIT.
+	Limit int
+}
+
+// SessionSummary is one row of list-sessions' response — everything
+// `carryon ls` shows a column for, plus ProjectID (not displayed, but
+// needed by anything that filters further client-side).
+type SessionSummary struct {
+	ID             string    `json:"id"`
+	ProjectID      string    `json:"projectId"`
+	ProjectName    string    `json:"projectName"`
+	OwnerLogin     string    `json:"ownerLogin"`
+	Branch         string    `json:"branch"`
+	Title          string    `json:"title"`
+	LastActivityAt time.Time `json:"lastActivityAt"`
+	Status         string    `json:"status"`
+}
+
+// ListSessions calls the list-sessions Edge Function (CO-204): every
+// session the caller is a member of the project for (any role — see
+// auth.md's access table), newest activity first.
+func (c *Client) ListSessions(ctx context.Context, accessToken string, in ListSessionsInput) ([]SessionSummary, error) {
+	body := map[string]any{}
+	if in.Project != "" {
+		body["project"] = in.Project
+	}
+	if in.Dev != "" {
+		body["dev"] = in.Dev
+	}
+	if in.Status != "" {
+		body["status"] = in.Status
+	}
+	if in.Since != nil {
+		body["since"] = in.Since.UTC().Format(time.RFC3339)
+	}
+	if in.Limit > 0 {
+		body["limit"] = in.Limit
+	}
+
+	var out struct {
+		Sessions []SessionSummary `json:"sessions"`
+	}
+	if err := c.post(ctx, "list-sessions", accessToken, body, &out); err != nil {
+		return nil, err
+	}
+	return out.Sessions, nil
 }

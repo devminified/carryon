@@ -4,7 +4,7 @@ Capture every Claude Code session on a registered repo, upload it (redacted) to 
 
 See `Overview.md` for the product pitch and 52-ticket build plan, `Devminified Carryon — System Design Document (SDD).md` for the architecture and invariants, and `Carryon-TRD-Tickets.md` for the full ticket descriptions. `CLAUDE.md` and `.claude/rules/` are the binding engineering conventions for this repo.
 
-**Current status:** Phase 1 ("working pull" — capture, upload, retry, status/logs) is complete, through `CO-113`. `carryon ls`, `pull`, `export`, and `rename` — the pull/resume side, Phase 2 — still print `not implemented` and exit `2`.
+**Current status:** Phase 1 ("working pull" — capture, upload, retry, status/logs) is complete, through `CO-113`. `carryon ls` (CO-204) lists sessions; `pull`, `export`, and `rename` — the rest of the pull/resume side, Phase 2 — still print `not implemented` and exit `2`.
 
 ## Install
 
@@ -109,7 +109,7 @@ Requires Go 1.23+.
 | `carryon agent` | implemented | CO-107 |
 | `carryon status` | implemented | CO-113 |
 | `carryon logs` | implemented | CO-113 |
-| `carryon ls` | not implemented | CO-204 |
+| `carryon ls` | implemented | CO-204 |
 | `carryon pull` | not implemented | CO-211 |
 | `carryon export` | not implemented | CO-211 |
 | `carryon rename` | not implemented | CO-405 |
