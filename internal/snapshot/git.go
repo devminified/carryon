@@ -106,14 +106,19 @@ func pushSnapshot(ctx context.Context, repoDir, remoteName, commitSHA, refName s
 	return err
 }
 
-// bundleTmpRef is a deterministic, Carryon-owned ref name used only for
+// BundleTmpRef is a deterministic, Carryon-owned ref name used only for
 // the few seconds it takes to create a fallback bundle — `git bundle
 // create` refuses a bare commit SHA with "Refusing to create empty
 // bundle" (verified against a live repo, not assumed from docs): it
 // needs an actual ref it can name in the bundle's header. Using
 // sessionID keeps it predictable without colliding with any real
 // branch, and it's deleted immediately after (see createBundle).
-func bundleTmpRef(sessionID string) string {
+//
+// Exported because the puller (internal/pull, CO-206) needs the exact
+// same ref name to fetch a bundle fallback back out again — it's a
+// shared contract between the push side and the pull side, not an
+// implementation detail of this package alone.
+func BundleTmpRef(sessionID string) string {
 	return "refs/carryon-tmp/" + sessionID
 }
 
@@ -126,7 +131,7 @@ func bundleTmpRef(sessionID string) string {
 // not — it never lingers as a side effect a `git branch`/`git log`
 // would show the developer.
 func createBundle(ctx context.Context, repoDir, commitSHA, remoteName, sessionID string) (path string, cleanup func(), err error) {
-	ref := bundleTmpRef(sessionID)
+	ref := BundleTmpRef(sessionID)
 	if _, err := runGit(ctx, localGitTimeout, repoDir, nil, "update-ref", ref, commitSHA); err != nil {
 		return "", nil, fmt.Errorf("creating temp ref: %w", err)
 	}

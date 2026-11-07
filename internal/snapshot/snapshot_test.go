@@ -647,7 +647,7 @@ func TestBundleAppliesOnAFreshCloneWithTheSameTreeSHA(t *testing.T) {
 
 	cloneDir := t.TempDir()
 	runGitCmd(t, cloneDir, "init", "--quiet")
-	runGitCmd(t, cloneDir, "fetch", bundlePath, bundleTmpRef("sess1"))
+	runGitCmd(t, cloneDir, "fetch", bundlePath, BundleTmpRef("sess1"))
 	fetchedSHA := runGitCmdOutput(t, cloneDir, "rev-parse", "FETCH_HEAD")
 	if fetchedSHA != commitSHA {
 		t.Fatalf("fetched commit = %q, want %q", fetchedSHA, commitSHA)

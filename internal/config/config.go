@@ -22,6 +22,14 @@ type Config struct {
 	APIURL string `toml:"api_url"`
 	// AnonKey is the project's anon/publishable key (safe to embed client-side).
 	AnonKey string `toml:"anon_key"`
+	// Repos remembers where `carryon pull` (CO-206) already found or
+	// cloned a project's local working copy, so later pulls don't ask
+	// again or clone a second copy. Keyed by the project's canonical
+	// remote (project.NormalizeRemote's form — host/owner/repo, stable
+	// across machines and remote-URL spellings), valued by an absolute
+	// local path. Omitted entirely from a fresh config.toml until the
+	// first pull actually needs it.
+	Repos map[string]string `toml:"repos,omitempty"`
 }
 
 // Dir returns ~/.carryon, creating it with mode 0700 if it doesn't exist.

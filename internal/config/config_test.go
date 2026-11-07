@@ -44,6 +44,29 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 	}
 }
 
+func TestSaveThenLoadRoundTripsRepos(t *testing.T) {
+	withFakeHome(t)
+
+	want := &Config{
+		APIURL:  "http://127.0.0.1:54421",
+		AnonKey: "sb_publishable_test",
+		Repos: map[string]string{
+			"github.com/devminified/acme-api": "/Users/ali/code/acme-api",
+		},
+	}
+	if err := Save(want); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.Repos["github.com/devminified/acme-api"] != "/Users/ali/code/acme-api" {
+		t.Errorf("Load().Repos = %+v, want the saved mapping", got.Repos)
+	}
+}
+
 func TestLoadRejectsMissingFields(t *testing.T) {
 	withFakeHome(t)
 
