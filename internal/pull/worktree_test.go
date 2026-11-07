@@ -288,14 +288,12 @@ func TestCleanWorktreesRemovesOnlyOnesUnderCarryonWork(t *testing.T) {
 		t.Fatalf("sanity check failed: ourWorktree = %q isn't under %q", ourWorktree, home)
 	}
 	// Captured before CleanWorktrees removes the directory —
-	// EvalSymlinks needs the path to still exist to resolve it.
-	// CleanWorktrees reports git's own canonicalized path (e.g.
-	// /private/var/... on macOS), which may differ textually from the
-	// unresolved form we built ourWorktree from, so compare resolved.
-	wantReal, err := filepath.EvalSymlinks(ourWorktree)
-	if err != nil {
-		t.Fatalf("EvalSymlinks(ourWorktree): %v", err)
-	}
+	// normalizeWorktreePath needs the path to still exist to resolve
+	// its symlinks. CleanWorktrees reports git's own path verbatim
+	// (always forward-slash, even on Windows), which differs textually
+	// from the native-separator form we built ourWorktree from, so
+	// compare normalized forms, same as the library code itself does.
+	wantReal := normalizeWorktreePath(ourWorktree)
 
 	// A second, unrelated worktree registered against the same clone,
 	// but living somewhere else entirely -- must survive the cleanup.
@@ -309,12 +307,12 @@ func TestCleanWorktreesRemovesOnlyOnesUnderCarryonWork(t *testing.T) {
 	if len(removed) != 1 {
 		t.Fatalf("removed = %v, want exactly 1 entry", removed)
 	}
-	// removed[0] is already git's own canonicalized form (confirmed:
-	// `worktree list` reports it resolved) — don't re-resolve it here,
-	// the directory is already gone by this point and EvalSymlinks on
-	// a path that no longer exists fails silently.
-	if removed[0] != wantReal {
-		t.Errorf("removed[0] = %q, want %q", removed[0], wantReal)
+	// removed[0] is git's own path verbatim (forward-slash, already
+	// symlink-resolved) — the directory is already gone by this point,
+	// so only convert its separator rather than trying to re-resolve
+	// symlinks on a path that no longer exists.
+	if got := filepath.FromSlash(removed[0]); got != wantReal {
+		t.Errorf("removed[0] = %q, want %q", got, wantReal)
 	}
 	if _, err := os.Stat(ourWorktree); !os.IsNotExist(err) {
 		t.Errorf("our worktree still exists after CleanWorktrees: stat err = %v", err)

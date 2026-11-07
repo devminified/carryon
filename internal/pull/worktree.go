@@ -220,6 +220,22 @@ func ensureWorktree(ctx context.Context, cloneDir, worktreePath, commit string) 
 	return false, nil
 }
 
+// normalizeWorktreePath resolves symlinks (best-effort) and converts to
+// the OS's native separator before comparing or taking a relative path
+// — `git worktree list --porcelain` always reports forward slashes,
+// even on Windows, which never string-compares or filepath.Rel's
+// correctly against a path Go's filepath.Join built with native
+// backslashes (found via a real Windows CI run: every worktree lookup
+// silently failed to match, even though the same code worked on macOS
+// and Linux).
+func normalizeWorktreePath(p string) string {
+	p = filepath.FromSlash(p)
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		return real
+	}
+	return p
+}
+
 // isRegisteredWorktree reports whether path is one of cloneDir's
 // registered worktrees (git worktree list --porcelain's "worktree "
 // lines, one absolute path per entry).
@@ -228,25 +244,13 @@ func isRegisteredWorktree(ctx context.Context, cloneDir, path string) (bool, err
 	if err != nil {
 		return false, fmt.Errorf("listing worktrees: %w", err)
 	}
-	// git canonicalizes a worktree's path when it registers it (e.g.
-	// resolving a symlinked temp dir on macOS to its real path), so
-	// compare resolved forms rather than the literal string we built —
-	// found via a real git worktree add/list round-trip disagreeing on
-	// /var/folders/... vs /private/var/folders/....
-	wantReal, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		wantReal = path
-	}
+	want := normalizeWorktreePath(path)
 	for _, line := range strings.Split(out, "\n") {
 		p, ok := strings.CutPrefix(line, "worktree ")
 		if !ok {
 			continue
 		}
-		gotReal, err := filepath.EvalSymlinks(p)
-		if err != nil {
-			gotReal = p
-		}
-		if gotReal == wantReal {
+		if normalizeWorktreePath(p) == want {
 			return true, nil
 		}
 	}
@@ -262,13 +266,7 @@ func CleanWorktrees(ctx context.Context, cloneDir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Compare against git's own canonicalized form — see
-	// isRegisteredWorktree's comment on why a literal comparison can
-	// disagree with what `worktree list` reports back.
-	workDirReal, err := filepath.EvalSymlinks(workDir)
-	if err != nil {
-		workDirReal = workDir
-	}
+	workDirNorm := normalizeWorktreePath(workDir)
 
 	out, err := runGit(ctx, localGitTimeout, cloneDir, "worktree", "list", "--porcelain")
 	if err != nil {
@@ -281,7 +279,7 @@ func CleanWorktrees(ctx context.Context, cloneDir string) ([]string, error) {
 		if !ok {
 			continue
 		}
-		rel, err := filepath.Rel(workDirReal, p)
+		rel, err := filepath.Rel(workDirNorm, normalizeWorktreePath(p))
 		if err != nil || strings.HasPrefix(rel, "..") {
 			continue // not under ~/carryon/work — not ours to remove
 		}
