@@ -103,22 +103,36 @@ type RewriteResult struct {
 // dstPath via a temp file + fsync + atomic rename (I2/I8). Line count
 // and order are always preserved exactly.
 func (r *PathRewriter) RewriteFile(srcPath, dstPath string) (*RewriteResult, error) {
+	result := &RewriteResult{}
+	err := streamRewriteFile(srcPath, dstPath, r.RewriteLine, &result.Lines, &result.LinesRewritten, &result.LinesUnparseable)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// streamRewriteFile is the shared streaming-rewrite ceremony behind
+// both RewriteFile (path rewrite, CO-207) and RewriteSessionIDFile
+// (session-ID rewrite, CO-208) — only the per-line rewrite func
+// differs between them, so this is the one place that owns reading
+// one line at a time, the temp-file + fsync + atomic rename (I2/I8),
+// and the three result counters every caller here needs.
+func streamRewriteFile(srcPath, dstPath string, rewriteLine func([]byte) ([]byte, bool), lines, rewritten, unparseable *int) error {
 	src, err := os.Open(srcPath) // #nosec G304 -- srcPath is the caller's own rebuilt session file
 	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", srcPath, err)
+		return fmt.Errorf("opening %s: %w", srcPath, err)
 	}
 	defer func() { _ = src.Close() }()
 
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o700); err != nil {
-		return nil, fmt.Errorf("creating directory for %s: %w", dstPath, err)
+		return fmt.Errorf("creating directory for %s: %w", dstPath, err)
 	}
 	tmp := dstPath + ".tmp"
 	dst, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600) // #nosec G304 -- tmp is derived from the caller's own dstPath
 	if err != nil {
-		return nil, fmt.Errorf("creating %s: %w", tmp, err)
+		return fmt.Errorf("creating %s: %w", tmp, err)
 	}
 
-	result := &RewriteResult{}
 	w := bufio.NewWriter(dst)
 	reader := bufio.NewReader(src)
 
@@ -134,24 +148,24 @@ func (r *PathRewriter) RewriteFile(srcPath, dstPath string) (*RewriteResult, err
 			trimmed = line[:len(line)-1]
 		}
 
-		result.Lines++
-		out, ok := r.RewriteLine(trimmed)
+		*lines++
+		out, ok := rewriteLine(trimmed)
 		if !ok {
-			result.LinesUnparseable++
+			*unparseable++
 		} else if !bytes.Equal(out, trimmed) {
-			result.LinesRewritten++
+			*rewritten++
 		}
 
 		if _, err := w.Write(out); err != nil {
 			_ = dst.Close()
 			_ = os.Remove(tmp)
-			return nil, fmt.Errorf("writing %s: %w", tmp, err)
+			return fmt.Errorf("writing %s: %w", tmp, err)
 		}
 		if hadNewline {
 			if err := w.WriteByte('\n'); err != nil {
 				_ = dst.Close()
 				_ = os.Remove(tmp)
-				return nil, fmt.Errorf("writing %s: %w", tmp, err)
+				return fmt.Errorf("writing %s: %w", tmp, err)
 			}
 		}
 
@@ -159,7 +173,7 @@ func (r *PathRewriter) RewriteFile(srcPath, dstPath string) (*RewriteResult, err
 			if readErr != io.EOF {
 				_ = dst.Close()
 				_ = os.Remove(tmp)
-				return nil, fmt.Errorf("reading %s: %w", srcPath, readErr)
+				return fmt.Errorf("reading %s: %w", srcPath, readErr)
 			}
 			break
 		}
@@ -168,21 +182,21 @@ func (r *PathRewriter) RewriteFile(srcPath, dstPath string) (*RewriteResult, err
 	if err := w.Flush(); err != nil {
 		_ = dst.Close()
 		_ = os.Remove(tmp)
-		return nil, fmt.Errorf("flushing %s: %w", tmp, err)
+		return fmt.Errorf("flushing %s: %w", tmp, err)
 	}
 	if err := dst.Sync(); err != nil {
 		_ = dst.Close()
 		_ = os.Remove(tmp)
-		return nil, fmt.Errorf("fsyncing %s: %w", tmp, err)
+		return fmt.Errorf("fsyncing %s: %w", tmp, err)
 	}
 	if err := dst.Close(); err != nil {
 		_ = os.Remove(tmp)
-		return nil, fmt.Errorf("closing %s: %w", tmp, err)
+		return fmt.Errorf("closing %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, dstPath); err != nil {
-		return nil, fmt.Errorf("renaming %s to %s: %w", tmp, dstPath, err)
+		return fmt.Errorf("renaming %s to %s: %w", tmp, dstPath, err)
 	}
-	return result, nil
+	return nil
 }
 
 // jsonFrame tracks one currently-open container while RewriteLine

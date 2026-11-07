@@ -6,6 +6,8 @@ The named RPCs: `register-session`, `register-chunk`, `confirm-chunk`, `end-sess
 
 `list-sessions` (CO-204) isn't in that original list either — it exists because `carryon ls` needs to list every session the caller can see across all of their projects, and there's no RLS to lean on yet (CO-302) that would let a plain PostgREST read do that safely. It checks `project_members` directly, the same stopgap every function in this phase uses, and resolves each row's owner GitHub login via `admin.auth.admin.getUserById` (the `auth` schema isn't exposed to PostgREST — see `auth.md`) rather than a SQL join.
 
+`register-fork` (CO-208) is the last of these — it creates the `sessions` row for a pulled/forked session (`parent_session_id` set, `status: 'live'`, owned by the puller). The puller's identity always comes from their own JWT, never a client-supplied field — the same reasoning as every other identity-sensitive write in this codebase. The session-ID rewrite inside the pulled transcript's own file happens entirely on the puller's laptop (`internal/pull.RewriteSessionIDFile`); this function is only the server-side bookkeeping so the fork's own agent has a row to upload into once the puller resumes.
+
 ## Contract
 
 ```ts
