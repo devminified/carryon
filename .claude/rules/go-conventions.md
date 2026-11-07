@@ -23,7 +23,7 @@ Every long-running call (`internal/upload`, `internal/pull`, `internal/api`) tak
 ## Concurrency
 
 - `internal/agent`'s debounce/scheduler and `internal/pull`'s bounded worker pool are the two places true concurrency lives. Everywhere else, prefer a straight-line sequential call.
-- Bound every worker pool and channel explicitly (the pull worker pool defaults to 6; the reorder min-heap caps at `pool size × 2`) — see Doc §"Pull path". Don't add an unbounded goroutine-per-item loop.
+- Bound every worker pool and channel explicitly. `internal/pull`'s download pool (CO-205) is a semaphore channel sized to 4, matching the ticket's own "download all chunks in parallel (4 at a time)" — not Doc §"Pull path"'s aspirational "default 6" or its streaming reorder min-heap, neither of which CO-205 builds: chunks are downloaded concurrently into memory, then written out in the manifest's already-validated seq order once every chunk for a stream has arrived, which is simpler and fine at this project's actual session sizes (CLAUDE.md: no speculative scale). If a future ticket needs bounded memory for very large sessions, build the streaming reorder buffer then, and update this line. Don't add an unbounded goroutine-per-item loop regardless.
 - A slow or failing session must not stall others: each pipeline stage after the reader operates on one session's slice at a time (Doc §"Laptop agent internals").
 
 ## Testing

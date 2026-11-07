@@ -136,3 +136,14 @@ const chunkBucket = "carryon-sessions"
 func (c *Client) StorageUploadURL(objectKey, token string) string {
 	return fmt.Sprintf("%s/storage/v1/object/upload/sign/%s/%s?token=%s", c.baseURL, chunkBucket, objectKey, url.QueryEscape(token))
 }
+
+// StorageDownloadURL builds the actual GET URL for a chunk's (or a
+// snapshot bundle's) signed download token from the client's own base
+// URL — get-manifest (CO-203) returns only the bare token, the same
+// reasoning as StorageUploadURL: createSignedUrl's own signedUrl bakes
+// in the Edge Function's internal SUPABASE_URL, unreachable from the
+// laptop actually downloading the bytes (get-manifest/index.ts's
+// signDownloadToken doc comment).
+func (c *Client) StorageDownloadURL(objectKey, token string) string {
+	return fmt.Sprintf("%s/storage/v1/object/sign/%s/%s?token=%s", c.baseURL, chunkBucket, objectKey, url.QueryEscape(token))
+}
