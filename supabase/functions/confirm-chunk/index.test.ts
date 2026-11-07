@@ -22,6 +22,8 @@ function fakeDeps(opts: {
   sessionUpdate?: { error?: any };
   // deno-lint-ignore no-explicit-any
   onSessionUpdate?: (row: any) => void;
+  // deno-lint-ignore no-explicit-any
+  onChunkUpsert?: (row: any) => void;
 }): Deps {
   return {
     requireUser: () => Promise.resolve(opts.user as never),
@@ -70,8 +72,11 @@ function fakeDeps(opts: {
           }
           if (table === "session_chunks") {
             return {
-              upsert: () =>
-                Promise.resolve(opts.chunkUpsert ?? { error: null }),
+              // deno-lint-ignore no-explicit-any
+              upsert: (row: any) => {
+                opts.onChunkUpsert?.(row);
+                return Promise.resolve(opts.chunkUpsert ?? { error: null });
+              },
               select: () => ({
                 eq: () =>
                   Promise.resolve(
@@ -184,6 +189,36 @@ Deno.test("inserts the session_chunks row when the object exists", async () => {
   assertEquals(res.status, 200);
   const body = await res.json();
   assertEquals(body.ok, true);
+});
+
+Deno.test("passes redactions through to the session_chunks upsert", async () => {
+  // deno-lint-ignore no-explicit-any
+  let upserted: any;
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    onChunkUpsert: (row) => {
+      upserted = row;
+    },
+  });
+
+  const res = await handle(req(validBody({ redactions: 3 })), deps);
+  assertEquals(res.status, 200);
+  assertEquals(upserted.redactions, 3);
+});
+
+Deno.test("defaults redactions to 0 when the caller omits it", async () => {
+  // deno-lint-ignore no-explicit-any
+  let upserted: any;
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    onChunkUpsert: (row) => {
+      upserted = row;
+    },
+  });
+
+  const res = await handle(req(validBody()), deps);
+  assertEquals(res.status, 200);
+  assertEquals(upserted.redactions, 0);
 });
 
 Deno.test("surfaces a session_chunks upsert failure as 500", async () => {

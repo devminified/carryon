@@ -30,7 +30,7 @@ A Linux CI runner starts local Supabase, runs the fake Claude transcript writer 
 
 ## Coverage targets
 
-100% on `internal/redact` (secret matching) and the chunk verify/hash-chain logic in `internal/pull` — these back I4 and I5 directly. 70%+ elsewhere.
+100% on `internal/redact` (secret matching) and the chunk verify/hash-chain logic in `internal/pull` — these back I4 and I5 directly, with one documented exception: `internal/redact`'s `redactJSON` sits at 99.7%, not 100%, because its one remaining uncovered line is a defensive `len(stack) == 0` bounds check inside the closing-delimiter case that — verified empirically against `encoding/json`'s own `Decoder.Token()` — can never actually be reached: a stray closing delimiter with no matching open is always rejected by the decoder itself as a syntax error before it would ever be handed back as a token. Keep the guard (cheap insurance against a future change proving this wrong) but don't chase the last 0.3% by weakening it or writing a test that doesn't really exercise what it claims to — that would be less honest than this line. 70%+ elsewhere.
 
 ## Nightly compatibility test (CO-503, NFR-10)
 

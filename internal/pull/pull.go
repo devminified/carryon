@@ -326,10 +326,16 @@ func downloadOneChunk(ctx context.Context, client *api.Client, cfg Config, chunk
 		return nil, fmt.Errorf("sha256 mismatch: got %s, want %s", gotHash, chunk.SHA256)
 	}
 
-	if wantLen := chunk.ByteEnd - chunk.ByteStart; int64(len(data)) != wantLen {
-		return nil, fmt.Errorf("decompressed length %d, want %d (byte range [%d, %d))", len(data), wantLen, chunk.ByteStart, chunk.ByteEnd)
-	}
-
+	// There used to be a check here that decompressed length equals
+	// chunk.ByteEnd-chunk.ByteStart. That held before CO-301:
+	// byteStart/byteEnd describe the ORIGINAL file's byte positions
+	// (per internal/api.ConfirmChunkInput's own doc comment), but
+	// redaction can both shrink a matched secret down to a shorter
+	// "[REDACTED:id]" placeholder and, for a short match against a
+	// longer rule ID, grow it — so the two lengths now legitimately
+	// diverge in either direction. The SHA256 check above is already
+	// the real, sufficient integrity guarantee (I4): it verifies these
+	// are exactly the bytes that were uploaded, whatever their length.
 	return data, nil
 }
 

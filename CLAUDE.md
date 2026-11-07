@@ -62,7 +62,7 @@ These ten hold everywhere in the codebase. A PR that would break one gets reject
 | Laptop binary | **Go 1.23+**, one static binary per OS/arch, released with GoReleaser |
 | CLI framework | **`spf13/cobra`** — `install`, `uninstall`, `login`, `hook`, `agent`, `status`, `ls`, `pull`, `export`, `rename` |
 | Compression | **`klauspost/compress/zstd`**, level 3 |
-| Secret detection | **gitleaks v8** `detect` package as a library, plus a Carryon path denylist |
+| Secret detection | `internal/redact`'s own hand-ported gitleaks-v8-pattern rules (native `regexp`, no gitleaks library dependency — measured ~150-transitive-package cost for no benefit over a plain JSONL scan, see `.claude/rules/redaction.md`) + a Carryon path denylist |
 | Background service | **`kardianos/service`** — launchd / systemd user unit / Windows Service |
 | Credential storage | **`zalando/go-keyring`** — Keychain / Credential Manager / Secret Service |
 | Git | the system `git` binary via `os/exec` |

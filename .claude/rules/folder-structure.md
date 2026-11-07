@@ -23,7 +23,7 @@ carryon/
 │   ├── queue/                          append-only queue file and compaction
 │   ├── state/                          per-session pointer files (last uploaded byte offset)
 │   ├── reader/                         incremental JSONL reader
-│   ├── redact/                         gitleaks rules + path denylist + entropy scan
+│   ├── redact/                         hand-ported gitleaks-pattern rules + Aho-Corasick prefilter + path denylist (CO-301; no gitleaks library dep, no entropy scan — see redaction.md)
 │   ├── upload/                         zstd compress, signed-URL client, retries, chunking
 │   ├── snapshot/                       temp-index git snapshots, bundle fallback
 │   ├── pull/                           manifest fetch, download, verify, decompress, rewrite, place, launch
@@ -47,6 +47,7 @@ carryon/
 │       ├── get-manifest/
 │       ├── list-sessions/             backs `carryon ls` (CO-204) — not in Doc's original RPC list, see edge-functions.md
 │       ├── register-fork/             creates the sessions row for a pulled/forked session (CO-208) — not in Doc's original RPC list, see edge-functions.md
+│       ├── get-config/                 server-configurable redaction rule overrides (CO-301) — not in Doc's original RPC list, see edge-functions.md
 │       ├── register-snapshot/
 │       ├── sign-snapshot-bundle/       signs the upload URL for register-snapshot's git-bundle fallback (CO-202)
 │       ├── summarize-session/
