@@ -538,8 +538,17 @@ func TestMaybeSnapshotNoRepoIsAQuietNoOp(t *testing.T) {
 func installRejectingPreReceiveHook(t *testing.T, bareRepoDir string) (counterPath string) {
 	t.Helper()
 	counterPath = filepath.Join(t.TempDir(), "hook-invocations")
+	// The hook script is interpreted by Git for Windows' own sh.exe
+	// (MSYS) even on Windows, which doesn't understand a literal
+	// backslash path the way a native Windows program would — found via
+	// a real Windows CI run, where counterPath's backslashes corrupted
+	// the embedded "echo x >> ..." line and the hook silently wrote
+	// nowhere. ToSlash() keeps counterPath itself (used by the Go-side
+	// os.ReadFile below) in native form; only the copy embedded in the
+	// shell script needs forward slashes.
+	scriptPath := filepath.ToSlash(counterPath)
 	script := "#!/bin/sh\n" +
-		"echo x >> " + counterPath + "\n" +
+		"echo x >> " + scriptPath + "\n" +
 		"while read oldrev newrev refname; do\n" +
 		"  case \"$refname\" in\n" +
 		"    refs/carryon/*) echo \"rejected: custom refs not allowed\" >&2; exit 1 ;;\n" +
