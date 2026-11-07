@@ -70,6 +70,9 @@ func writeSessionTable(b *strings.Builder, sessions []SessionInfo, now time.Time
 		if s.Blocked {
 			statusText = "blocked: " + s.BlockedReason
 		}
+		if len(s.ExcludedLargeFiles) > 0 {
+			statusText += fmt.Sprintf(" (%d large file(s) excluded from snapshot)", len(s.ExcludedLargeFiles))
+		}
 		fmt.Fprintf(b, "  %-*s  %-*s  %-*s  %-*s  %s\n", idWidth, id, projectWidth, project, uploadWidth, lastUpload, behindWidth, formatBytes(s.BytesBehind), statusText)
 	}
 }

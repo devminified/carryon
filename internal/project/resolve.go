@@ -21,35 +21,72 @@ var ErrNoRemote = errors.New("git repository has no remotes")
 // this is a safety net against an unexpected hang, not an expected cost.
 const gitCommandTimeout = 5 * time.Second
 
-// ResolveRemote finds the canonical git remote for the repository
-// containing cwd (CO-108): it runs `git rev-parse --show-toplevel` (so a
-// nested subfolder resolves the same as the repo root), reads
-// remote.origin.url, falling back to the first configured remote if
-// there's no "origin", and normalizes the result with NormalizeRemote.
+// Toplevel returns the absolute path to the repository root containing
+// cwd ("git rev-parse --show-toplevel") — so a nested subfolder resolves
+// the same as the repo root. CO-201's snapshot capture (and anything
+// else that needs to run further git commands reliably) uses this
+// directly; ResolveRemote and RemoteName use it internally too.
 //
-// Returns ErrNoRepo if cwd isn't inside a git repository, or ErrNoRemote
-// if the repository has no remotes at all.
-func ResolveRemote(ctx context.Context, cwd string) (string, error) {
+// Returns ErrNoRepo if cwd isn't inside a git repository.
+func Toplevel(ctx context.Context, cwd string) (string, error) {
 	if cwd == "" {
 		return "", ErrNoRepo
 	}
-
 	toplevel, err := gitOutput(ctx, cwd, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", ErrNoRepo
 	}
+	return toplevel, nil
+}
 
-	raw, err := gitOutput(ctx, toplevel, "remote", "get-url", "origin")
+// RemoteName returns the local name of the remote ResolveRemote would
+// resolve for cwd's repository — "origin" if configured, else the first
+// configured remote — matching ResolveRemote's own fallback exactly.
+// CO-201's snapshot push needs this: it must push to the SAME remote
+// ResolveRemote used to match the registered project, never a different
+// one just because more than one happens to be configured.
+//
+// Returns ErrNoRepo / ErrNoRemote under the same conditions as
+// ResolveRemote.
+func RemoteName(ctx context.Context, cwd string) (string, error) {
+	toplevel, err := Toplevel(ctx, cwd)
 	if err != nil {
-		names, listErr := gitOutput(ctx, toplevel, "remote")
-		if listErr != nil || names == "" {
-			return "", ErrNoRemote
-		}
-		first, _, _ := strings.Cut(names, "\n")
-		raw, err = gitOutput(ctx, toplevel, "remote", "get-url", first)
-		if err != nil {
-			return "", ErrNoRemote
-		}
+		return "", err
+	}
+
+	if _, err := gitOutput(ctx, toplevel, "remote", "get-url", "origin"); err == nil {
+		return "origin", nil
+	}
+
+	names, err := gitOutput(ctx, toplevel, "remote")
+	if err != nil || names == "" {
+		return "", ErrNoRemote
+	}
+	first, _, _ := strings.Cut(names, "\n")
+	return first, nil
+}
+
+// ResolveRemote finds the canonical git remote for the repository
+// containing cwd (CO-108): resolves the repo's toplevel, picks the
+// remote RemoteName would (origin, falling back to the first configured
+// remote), and normalizes its URL with NormalizeRemote.
+//
+// Returns ErrNoRepo if cwd isn't inside a git repository, or ErrNoRemote
+// if the repository has no remotes at all.
+func ResolveRemote(ctx context.Context, cwd string) (string, error) {
+	toplevel, err := Toplevel(ctx, cwd)
+	if err != nil {
+		return "", err
+	}
+
+	name, err := RemoteName(ctx, toplevel)
+	if err != nil {
+		return "", err
+	}
+
+	raw, err := gitOutput(ctx, toplevel, "remote", "get-url", name)
+	if err != nil {
+		return "", ErrNoRemote
 	}
 
 	return NormalizeRemote(raw)

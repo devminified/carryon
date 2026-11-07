@@ -48,6 +48,7 @@ func runStatus(cmd *cobra.Command, jsonOutput bool) error {
 		AgentStatusPath: filepath.Join(carryonDir, "agent-status.json"),
 		SkippedPath:     filepath.Join(carryonDir, "skipped-repos.json"),
 		StateDir:        filepath.Join(carryonDir, "state"),
+		SnapshotDir:     filepath.Join(carryonDir, "snapshot-state"),
 	}
 
 	report := status.Gather(cmd.Context(), cfg.APIURL, provider, paths)

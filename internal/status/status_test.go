@@ -13,6 +13,7 @@ import (
 	"github.com/devminified/carryon/internal/agent"
 	"github.com/devminified/carryon/internal/auth"
 	"github.com/devminified/carryon/internal/filter"
+	"github.com/devminified/carryon/internal/snapshot"
 	"github.com/devminified/carryon/internal/state"
 )
 
@@ -194,6 +195,40 @@ func TestGatherSessionsIncludeBlockedReasonAndBytesBehind(t *testing.T) {
 	}
 	if s2.BytesBehind != 0 {
 		t.Errorf("s2.BytesBehind = %d, want 0 (its transcript file doesn't exist)", s2.BytesBehind)
+	}
+}
+
+func TestGatherSessionsIncludeExcludedLargeFiles(t *testing.T) {
+	dir := t.TempDir()
+	snapshotDir := filepath.Join(dir, "snapshot-state")
+	if err := os.MkdirAll(snapshotDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeJSON(t, filepath.Join(snapshotDir, "s1.json"), snapshot.Pointer{
+		TreeSHA:            "deadbeef",
+		ExcludedLargeFiles: []string{"big.bin"},
+	})
+
+	transcriptPath := filepath.Join(dir, "s1.jsonl")
+	if err := os.WriteFile(transcriptPath, []byte("hi\n"), 0o600); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	statusPath := filepath.Join(dir, "agent-status.json")
+	writeJSON(t, statusPath, agent.StatusFile{
+		UpdatedAt: time.Now(),
+		StartedAt: time.Now(),
+		Sessions: []agent.SessionStatus{
+			{SessionID: "s1", TranscriptPath: transcriptPath},
+		},
+	})
+
+	r := Gather(context.Background(), "http://local", &fakeAuthChecker{}, Paths{AgentStatusPath: statusPath, SnapshotDir: snapshotDir})
+	if len(r.Sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(r.Sessions))
+	}
+	if got := r.Sessions[0].ExcludedLargeFiles; len(got) != 1 || got[0] != "big.bin" {
+		t.Errorf("ExcludedLargeFiles = %v, want [\"big.bin\"]", got)
 	}
 }
 

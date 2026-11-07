@@ -1,0 +1,130 @@
+package snapshot
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// localGitTimeout bounds every git invocation that never leaves the
+// laptop (read-tree, add, write-tree, commit-tree, update-index,
+// rev-parse) — these are local, metadata-only operations and should
+// return near-instantly, matching internal/project's own
+// gitCommandTimeout.
+const localGitTimeout = 10 * time.Second
+
+// pushTimeout bounds the one git invocation that's a real network call.
+const pushTimeout = 60 * time.Second
+
+// newTempIndex returns a path to use as GIT_INDEX_FILE and a cleanup
+// func — CO-201's "never touches the developer's index, stash, branch
+// or index.lock": every index-touching git command below runs with
+// GIT_INDEX_FILE pointed here instead of the repo's real .git/index, so
+// none of them can ever create a real index.lock or disturb what's
+// actually staged. The path itself doesn't need to exist yet — git
+// creates it fresh on the first read-tree/add.
+func newTempIndex() (path string, cleanup func(), err error) {
+	dir, err := os.MkdirTemp("", "carryon-snapshot-index-")
+	if err != nil {
+		return "", nil, fmt.Errorf("creating temp index dir: %w", err)
+	}
+	return filepath.Join(dir, "index"), func() { _ = os.RemoveAll(dir) }, nil
+}
+
+// readTreeHead loads HEAD's tree into indexPath. A repo with no commits
+// yet has no HEAD to read — that's not an error here, it just means the
+// temp index starts empty (git add -A below stages everything as new).
+func readTreeHead(ctx context.Context, repoDir, indexPath string) error {
+	_, err := runGit(ctx, localGitTimeout, repoDir, indexEnv(indexPath), "read-tree", "HEAD")
+	if err != nil && !strings.Contains(err.Error(), "Not a valid object name HEAD") && !strings.Contains(err.Error(), "ambiguous argument 'HEAD'") {
+		return err
+	}
+	return nil
+}
+
+// addAll stages every change in the working tree into indexPath,
+// respecting .gitignore (git add -A's default behavior — no -f).
+func addAll(ctx context.Context, repoDir, indexPath string) error {
+	_, err := runGit(ctx, localGitTimeout, repoDir, indexEnv(indexPath), "add", "-A")
+	return err
+}
+
+// untrackedFiles lists every untracked, non-ignored file — exactly
+// what `git add -A` just staged as new, which is also exactly the set
+// CO-201's 50MB-exclusion rule applies to (a *tracked* file growing past
+// 50MB is never excluded, only brand-new untracked ones).
+func untrackedFiles(ctx context.Context, repoDir string) ([]string, error) {
+	out, err := runGit(ctx, localGitTimeout, repoDir, nil, "ls-files", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+// forceRemoveFromIndex drops path from indexPath without touching the
+// working tree file itself — used to exclude a too-large untracked file
+// that addAll just staged.
+func forceRemoveFromIndex(ctx context.Context, repoDir, indexPath, path string) error {
+	_, err := runGit(ctx, localGitTimeout, repoDir, indexEnv(indexPath), "update-index", "--force-remove", "--", path)
+	return err
+}
+
+// writeTree writes indexPath's current contents as a tree object and
+// returns its SHA.
+func writeTree(ctx context.Context, repoDir, indexPath string) (string, error) {
+	return runGit(ctx, localGitTimeout, repoDir, indexEnv(indexPath), "write-tree")
+}
+
+// commitTree creates a commit object for treeSHA with the given parent
+// (empty parentSHA means no parent — a repo's first-ever commit) and
+// message, returning the new commit's SHA. No index involved at all, so
+// no GIT_INDEX_FILE needed here.
+func commitTree(ctx context.Context, repoDir, treeSHA, parentSHA, message string) (string, error) {
+	args := []string{"commit-tree", treeSHA}
+	if parentSHA != "" {
+		args = append(args, "-p", parentSHA)
+	}
+	args = append(args, "-m", message)
+	return runGit(ctx, localGitTimeout, repoDir, nil, args...)
+}
+
+// pushSnapshot pushes commitSHA to refName on remoteName, force (CO-201:
+// the ref is Carryon's own hidden pointer, always meant to move to
+// wherever the latest snapshot commit is — never a ref a human is
+// expected to fast-forward manually). This is the one network call in
+// the whole package.
+func pushSnapshot(ctx context.Context, repoDir, remoteName, commitSHA, refName string) error {
+	_, err := runGit(ctx, pushTimeout, repoDir, nil, "push", remoteName, commitSHA+":"+refName, "--force")
+	return err
+}
+
+func indexEnv(indexPath string) []string {
+	return []string{"GIT_INDEX_FILE=" + indexPath}
+}
+
+func runGit(ctx context.Context, timeout time.Duration, dir string, extraEnv []string, args ...string) (string, error) {
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(cctx, "git", args...) // #nosec G204 -- args are fixed literals/caller-controlled SHAs and paths, never shell-interpolated
+	cmd.Dir = dir
+	if extraEnv != nil {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}

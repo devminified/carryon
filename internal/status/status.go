@@ -3,9 +3,11 @@
 // backend URL, an AuthChecker for login state, internal/agent's own
 // status file for agent/session state, internal/state's persisted
 // pointers (cross-referenced against each session's live transcript
-// size) for bytes behind, and internal/filter's skipped-repos file —
-// and rendering it either as stable JSON or as the human-readable text
-// `carryon status` prints by default.
+// size) for bytes behind, internal/filter's skipped-repos file, and
+// internal/snapshot's own per-session state (CO-201's "large untracked
+// files excluded, with a warning in status") — and rendering it either
+// as stable JSON or as the human-readable text `carryon status` prints
+// by default.
 package status
 
 import (
@@ -17,6 +19,7 @@ import (
 	"github.com/devminified/carryon/internal/auth"
 	"github.com/devminified/carryon/internal/filter"
 	"github.com/devminified/carryon/internal/project"
+	"github.com/devminified/carryon/internal/snapshot"
 	"github.com/devminified/carryon/internal/state"
 )
 
@@ -67,6 +70,10 @@ type SessionInfo struct {
 	BytesBehind   int64      `json:"bytes_behind"`
 	Blocked       bool       `json:"blocked"`
 	BlockedReason string     `json:"blocked_reason,omitempty"`
+	// ExcludedLargeFiles (CO-201) lists untracked files over the
+	// snapshot's 50MB limit that the most recent snapshot attempt left
+	// out.
+	ExcludedLargeFiles []string `json:"excluded_large_files,omitempty"`
 }
 
 // AuthChecker is the subset of *auth.Provider Gather needs — a small
@@ -85,6 +92,7 @@ type Paths struct {
 	AgentStatusPath string // ~/.carryon/agent-status.json
 	SkippedPath     string // ~/.carryon/skipped-repos.json
 	StateDir        string // ~/.carryon/state
+	SnapshotDir     string // ~/.carryon/snapshot-state
 }
 
 // Gather assembles a Report. It never returns an error — every source
@@ -110,13 +118,15 @@ func Gather(ctx context.Context, backendURL string, authChecker AuthChecker, pat
 		report.Agent.UptimeSeconds = int64(time.Since(statusFile.StartedAt).Seconds())
 
 		for _, s := range statusFile.Sessions {
+			snap, _ := snapshot.Load(paths.SnapshotDir, s.SessionID)
 			report.Sessions = append(report.Sessions, SessionInfo{
-				SessionID:     s.SessionID,
-				Project:       projectLabel(ctx, s.Cwd),
-				LastUploadAt:  s.LastUploadAt,
-				BytesBehind:   bytesBehind(paths.StateDir, s.SessionID, s.TranscriptPath),
-				Blocked:       s.Blocked,
-				BlockedReason: s.BlockedReason,
+				SessionID:          s.SessionID,
+				Project:            projectLabel(ctx, s.Cwd),
+				LastUploadAt:       s.LastUploadAt,
+				BytesBehind:        bytesBehind(paths.StateDir, s.SessionID, s.TranscriptPath),
+				Blocked:            s.Blocked,
+				BlockedReason:      s.BlockedReason,
+				ExcludedLargeFiles: snap.ExcludedLargeFiles,
 			})
 		}
 	}
