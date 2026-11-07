@@ -23,3 +23,20 @@ export async function memberRole(
   if (error) throw error;
   return data?.role ?? null;
 }
+
+// Mirrors the Postgres project_role enum's declared order (database-rls.md:
+// "viewer < resumer < admin only holds under >= if declared in that
+// order") — CO-302 will enforce this in RLS itself; until then, every
+// function that needs a minimum role (not just "any member") checks it
+// here, the same way has_role() will in the database later.
+const ROLE_ORDER: Record<string, number> = { viewer: 0, resumer: 1, admin: 2 };
+
+/** True if role is at least minRole in the viewer < resumer < admin
+ * order. A null role (not a member at all) is never sufficient. */
+export function hasMinRole(role: string | null, minRole: string): boolean {
+  if (role === null) return false;
+  const roleRank = ROLE_ORDER[role];
+  const minRank = ROLE_ORDER[minRole];
+  if (roleRank === undefined || minRank === undefined) return false;
+  return roleRank >= minRank;
+}
