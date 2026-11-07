@@ -168,6 +168,7 @@ func (p *agentProgram) Start(kservice.Service) error {
 		TokenSource:  lazy.accessToken,
 		CurrentUser:  lazy.githubLogin,
 		StateDir:     filepath.Join(carryonDir, "snapshot-state"),
+		RepoStateDir: filepath.Join(carryonDir, "snapshot-repo-state"),
 	})
 	if err != nil {
 		return fmt.Errorf("agent: %w", err)

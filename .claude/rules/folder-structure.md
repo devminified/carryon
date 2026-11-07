@@ -46,6 +46,7 @@ carryon/
 │       ├── end-session/
 │       ├── get-manifest/
 │       ├── register-snapshot/
+│       ├── sign-snapshot-bundle/       signs the upload URL for register-snapshot's git-bundle fallback (CO-202)
 │       ├── summarize-session/
 │       ├── rescan/
 │       ├── sync-github-teams/

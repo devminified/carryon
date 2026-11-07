@@ -25,6 +25,14 @@ func NormalizeRemote(remote string) (string, error) {
 	var host, path string
 
 	switch {
+	case isWindowsDriveLetterPath(remote):
+		// A Windows absolute path (C:\foo or C:/foo) would otherwise
+		// fall into the bare "host:path" case below and "successfully"
+		// normalize with a one-letter host — found via a real Windows
+		// CI run where a local bare-path git remote (this project's own
+		// test fixture style, standing in for GitHub without a network
+		// call) normalized instead of being rejected as unrecognized.
+		return "", fmt.Errorf("unrecognized remote format %q", remote)
 	case strings.Contains(remote, "://"):
 		// A real URL: https://host[:port]/path, ssh://[user@]host[:port]/path, git://host/path, …
 		u, err := url.Parse(remote)
@@ -67,4 +75,17 @@ func NormalizeRemote(remote string) (string, error) {
 	}
 
 	return host + "/" + path, nil
+}
+
+// isWindowsDriveLetterPath reports whether remote looks like a Windows
+// absolute path — a single ASCII letter, a colon, then a path
+// separator (C:\Users\... or C:/Users/...) — as opposed to a real
+// scp-like remote, which never has a one-character hostname.
+func isWindowsDriveLetterPath(remote string) bool {
+	if len(remote) < 3 {
+		return false
+	}
+	letter := remote[0]
+	isLetter := (letter >= 'A' && letter <= 'Z') || (letter >= 'a' && letter <= 'z')
+	return isLetter && remote[1] == ':' && (remote[2] == '/' || remote[2] == '\\')
 }

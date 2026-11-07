@@ -10,8 +10,10 @@
 package snapshot
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -52,6 +54,15 @@ type Config struct {
 	// StateDir is ~/.carryon/snapshot-state — this package's own
 	// per-session Pointer files live here, one per session.
 	StateDir string
+	// RepoStateDir is ~/.carryon/snapshot-repo-state (CO-202) — where the
+	// per-repo "the ref push was rejected, use the bundle fallback for a
+	// while" memory lives. Required; a repo's rejection state must
+	// survive across sessions and agent restarts, same as everything
+	// else this package persists.
+	RepoStateDir string
+	// HTTPClient is used for the PUT to a fallback bundle's signed
+	// upload URL (CO-202). Defaults to a 60-second-timeout client.
+	HTTPClient *http.Client
 
 	// now is overridable so tests can control the 5-minute rate limit
 	// deterministically without real sleeps.
@@ -64,6 +75,8 @@ type Snapshotter struct {
 	tokenSource  TokenSource
 	currentUser  CurrentUserFunc
 	stateDir     string
+	repoStateDir string
+	httpClient   *http.Client
 	now          func() time.Time
 }
 
@@ -81,15 +94,24 @@ func New(cfg Config) (*Snapshotter, error) {
 	if cfg.StateDir == "" {
 		return nil, fmt.Errorf("snapshot: StateDir is required")
 	}
+	if cfg.RepoStateDir == "" {
+		return nil, fmt.Errorf("snapshot: RepoStateDir is required")
+	}
 	now := cfg.now
 	if now == nil {
 		now = time.Now
+	}
+	httpClient := cfg.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 60 * time.Second}
 	}
 	return &Snapshotter{
 		clientSource: cfg.ClientSource,
 		tokenSource:  cfg.TokenSource,
 		currentUser:  cfg.CurrentUser,
 		stateDir:     cfg.StateDir,
+		repoStateDir: cfg.RepoStateDir,
+		httpClient:   httpClient,
 		now:          now,
 	}, nil
 }
@@ -176,8 +198,45 @@ func (s *Snapshotter) MaybeSnapshot(ctx context.Context, sessionID, cwd string, 
 	}
 	refName := "refs/carryon/" + login + "/" + sessionID
 
-	if err := pushSnapshot(ctx, toplevel, remoteName, commitSHA, refName); err != nil {
-		return fmt.Errorf("pushing snapshot: %w", err)
+	// remoteURL (best-effort) keys the per-repo "use the bundle fallback
+	// for a while" memory (CO-202) — two sessions in the same repo must
+	// share it, since the rejection reason (a pre-receive hook, no push
+	// permission) is a property of the remote, not of either session.
+	// RemoteURL's raw form, not ResolveRemote's normalized one — this
+	// bookkeeping only needs to be stable for this repo's own git
+	// config, not to match a server-registered project.
+	remoteURL, _ := project.RemoteURL(ctx, toplevel)
+
+	useBundle := false
+	if remoteURL != "" {
+		fb, _ := loadRepoFallback(s.repoStateDir, remoteURL)
+		if !fb.LastRejectedAt.IsZero() && now.Sub(fb.LastRejectedAt) < bundleFallbackWindow {
+			useBundle = true
+		}
+	}
+
+	regInput := api.RegisterSnapshotInput{
+		SessionID: sessionID,
+		Seq:       next.NextSeq,
+		HeadSHA:   headSHA,
+		TreeSHA:   treeSHA,
+	}
+
+	if !useBundle {
+		if err := pushSnapshot(ctx, toplevel, remoteName, commitSHA, refName); err != nil {
+			if remoteURL != "" {
+				_ = saveRepoFallback(s.repoStateDir, remoteURL, repoFallback{LastRejectedAt: now})
+			}
+			useBundle = true
+		} else {
+			regInput.WipRef = refName
+		}
+	}
+
+	if useBundle {
+		if err := s.uploadBundle(ctx, toplevel, commitSHA, remoteName, sessionID, next.NextSeq); err != nil {
+			return fmt.Errorf("uploading fallback bundle: %w", err)
+		}
 	}
 
 	token, err := s.tokenSource(ctx)
@@ -188,18 +247,64 @@ func (s *Snapshotter) MaybeSnapshot(ctx context.Context, sessionID, cwd string, 
 	if err != nil {
 		return fmt.Errorf("getting api client: %w", err)
 	}
-	if err := client.RegisterSnapshot(ctx, token, api.RegisterSnapshotInput{
-		SessionID: sessionID,
-		Seq:       next.NextSeq,
-		HeadSHA:   headSHA,
-		WipRef:    refName,
-		TreeSHA:   treeSHA,
-	}); err != nil {
+	if err := client.RegisterSnapshot(ctx, token, regInput); err != nil {
 		return fmt.Errorf("registering snapshot: %w", err)
 	}
 
 	next.NextSeq = prior.NextSeq + 1
 	return Save(s.stateDir, sessionID, next)
+}
+
+// uploadBundle is CO-202's fallback path: create a bundle of only the
+// objects missing from remoteName, get a signed upload URL for it via
+// sign-snapshot-bundle, and PUT it there.
+func (s *Snapshotter) uploadBundle(ctx context.Context, toplevel, commitSHA, remoteName, sessionID string, seq int) error {
+	bundlePath, cleanup, err := createBundle(ctx, toplevel, commitSHA, remoteName, sessionID)
+	if err != nil {
+		return fmt.Errorf("creating bundle: %w", err)
+	}
+	defer cleanup()
+
+	data, err := os.ReadFile(bundlePath) // #nosec G304 -- bundlePath is our own temp file, created a few lines above
+	if err != nil {
+		return fmt.Errorf("reading bundle file: %w", err)
+	}
+
+	token, err := s.tokenSource(ctx)
+	if err != nil {
+		return fmt.Errorf("getting access token: %w", err)
+	}
+	client, err := s.clientSource()
+	if err != nil {
+		return fmt.Errorf("getting api client: %w", err)
+	}
+
+	signed, err := client.SignSnapshotBundle(ctx, token, api.SignSnapshotBundleInput{SessionID: sessionID, Seq: seq})
+	if err != nil {
+		return fmt.Errorf("signing bundle upload: %w", err)
+	}
+
+	return s.put(ctx, client.StorageUploadURL(signed.ObjectKey, signed.UploadToken), data)
+}
+
+func (s *Snapshotter) put(ctx context.Context, url string, data []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("building PUT request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.ContentLength = int64(len(data))
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("PUT failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("PUT returned HTTP %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // excludeLargeUntrackedFiles drops every untracked file over

@@ -85,9 +85,25 @@ func TestNormalizeRemoteRejectsInvalidInput(t *testing.T) {
 		"",
 		"   ",
 		"not-a-remote-at-all",
-		"https://github.com",     // no path
-		"git@github.com:",        // empty path
-		"git@github.com:.git",    // path is just .git
+		"https://github.com",  // no path
+		"git@github.com:",     // empty path
+		"git@github.com:.git", // path is just .git
+	}
+	for _, in := range cases {
+		if _, err := NormalizeRemote(in); err == nil {
+			t.Errorf("NormalizeRemote(%q) = nil error, want an error", in)
+		}
+	}
+}
+
+func TestNormalizeRemoteRejectsWindowsDriveLetterPaths(t *testing.T) {
+	// A Windows absolute path must not be misread as scp-like
+	// "host:path" syntax with a one-letter host — found via a real
+	// Windows CI run (see remote.go's isWindowsDriveLetterPath).
+	cases := []string{
+		`C:\Users\dev\AppData\Local\Temp\some-bare-repo`,
+		`C:/Users/dev/AppData/Local/Temp/some-bare-repo`,
+		`d:\repos\acme-api`,
 	}
 	for _, in := range cases {
 		if _, err := NormalizeRemote(in); err == nil {

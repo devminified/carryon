@@ -5,6 +5,16 @@
 // This just records the pointer: which commit/tree the snapshot is, and
 // which ref it lives on, so a later pull can find and check it out.
 //
+// CO-202: if wipRef is omitted, this is the git-bundle fallback path
+// instead (the push to refs/carryon/* was rejected) — a bundle was
+// already uploaded via sign-snapshot-bundle's signed URL, and this
+// function independently verifies the object actually exists in
+// Storage (the same "never trust the client's say-so" reasoning
+// confirm-chunk already applies to chunks) before recording object_key
+// instead of wip_ref. The object key itself is re-derived server-side
+// from the session's own stored project_id/user_id, never taken from
+// client input, so a caller can't point it at an unrelated object.
+//
 // Idempotent on (session_id, seq) via ON CONFLICT ... DO UPDATE (I3): a
 // retried call for the same seq replaces the row instead of erroring or
 // duplicating, same pattern as confirm-chunk.
@@ -16,6 +26,7 @@
 import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";
 import { memberRole } from "../_shared/membership.ts";
+import { bundleObjectKey } from "../_shared/snapshots.ts";
 import {
   adminClient as realAdminClient,
   requireUser as realRequireUser,
@@ -25,9 +36,11 @@ const Input = z.object({
   sessionId: z.string().uuid(),
   seq: z.number().int().nonnegative(),
   headSha: z.string().min(1).max(64),
-  wipRef: z.string().min(1).max(500),
+  wipRef: z.string().min(1).max(500).optional(),
   treeSha: z.string().min(1).max(64),
 });
+
+const BUCKET = "carryon-sessions";
 
 // Deps exists so tests can inject fakes for the two Supabase calls
 // without a live instance — see index.test.ts.
@@ -69,7 +82,7 @@ export async function handle(
 
   const { data: session, error: sessionErr } = await admin
     .from("sessions")
-    .select("project_id")
+    .select("project_id, user_id")
     .eq("id", input.sessionId)
     .maybeSingle();
   if (sessionErr) {
@@ -91,6 +104,26 @@ export async function handle(
     return errorResponse(403, "forbidden");
   }
 
+  let objectKey: string | null = null;
+  if (!input.wipRef) {
+    objectKey = bundleObjectKey(
+      session.project_id,
+      session.user_id,
+      input.sessionId,
+      input.seq,
+    );
+    const { error: infoErr } = await admin.storage.from(BUCKET).info(
+      objectKey,
+    );
+    if (infoErr) {
+      return errorResponse(
+        409,
+        "object_missing",
+        `bundle object ${objectKey} was not found in storage — the upload may have failed`,
+      );
+    }
+  }
+
   const { error: upsertErr } = await admin
     .from("code_snapshots")
     .upsert(
@@ -98,7 +131,8 @@ export async function handle(
         session_id: input.sessionId,
         seq: input.seq,
         head_sha: input.headSha,
-        wip_ref: input.wipRef,
+        wip_ref: input.wipRef ?? null,
+        object_key: objectKey,
         tree_sha: input.treeSha,
       },
       { onConflict: "session_id,seq" },

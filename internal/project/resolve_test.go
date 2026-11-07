@@ -188,6 +188,45 @@ func TestToplevelFromNestedSubfolder(t *testing.T) {
 	}
 }
 
+func TestRemoteURLReturnsTheRawUnnormalizedURL(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	addRemote(t, dir, "origin", "git@github.com:devminified/acme-api.git")
+
+	got, err := RemoteURL(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("RemoteURL() error = %v", err)
+	}
+	if want := "git@github.com:devminified/acme-api.git"; got != want {
+		t.Errorf("RemoteURL() = %q, want %q (unnormalized)", got, want)
+	}
+}
+
+func TestRemoteURLWorksForAShapeNormalizeRemoteRejects(t *testing.T) {
+	// A local bare-path remote isn't a real-world shape, but it's
+	// exactly what this project's own tests use to stand in for GitHub
+	// without a real network call — and NormalizeRemote correctly
+	// rejects it ("unrecognized remote format"), which ResolveRemote
+	// would surface as an error. RemoteURL must not depend on that
+	// recognition succeeding.
+	dir := t.TempDir()
+	initRepo(t, dir)
+	bareDir := t.TempDir()
+	addRemote(t, dir, "origin", bareDir)
+
+	got, err := RemoteURL(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("RemoteURL() error = %v", err)
+	}
+	if got != bareDir {
+		t.Errorf("RemoteURL() = %q, want %q", got, bareDir)
+	}
+
+	if _, err := ResolveRemote(context.Background(), dir); err == nil {
+		t.Error("ResolveRemote() error = nil for a local bare path, want an error (sanity check that this case genuinely exercises RemoteURL's robustness, not ResolveRemote's)")
+	}
+}
+
 func TestResolveRemoteEmptyCwd(t *testing.T) {
 	_, err := ResolveRemote(context.Background(), "")
 	if !errors.Is(err, ErrNoRepo) {
