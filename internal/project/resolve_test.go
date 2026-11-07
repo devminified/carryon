@@ -302,3 +302,56 @@ func TestHeadSHAMatchesTheLatestCommit(t *testing.T) {
 		t.Errorf("HeadSHA() = %q, want %q", got, sha)
 	}
 }
+
+func TestUncommittedFileCountCleanWorktree(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	commit(t, dir, "initial")
+
+	got, err := UncommittedFileCount(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("UncommittedFileCount() error = %v", err)
+	}
+	if got != 0 {
+		t.Errorf("UncommittedFileCount() = %d, want 0", got)
+	}
+}
+
+func TestUncommittedFileCountCountsModifiedStagedAndUntracked(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("v1"), 0o600); err != nil {
+		t.Fatalf("writing tracked.txt: %v", err)
+	}
+	runGit(t, dir, "add", "tracked.txt")
+	commit(t, dir, "initial")
+
+	// modified, tracked
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("v2"), 0o600); err != nil {
+		t.Fatalf("modifying tracked.txt: %v", err)
+	}
+	// staged, new
+	if err := os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("new"), 0o600); err != nil {
+		t.Fatalf("writing staged.txt: %v", err)
+	}
+	runGit(t, dir, "add", "staged.txt")
+	// untracked
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new"), 0o600); err != nil {
+		t.Fatalf("writing untracked.txt: %v", err)
+	}
+
+	got, err := UncommittedFileCount(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("UncommittedFileCount() error = %v", err)
+	}
+	if got != 3 {
+		t.Errorf("UncommittedFileCount() = %d, want 3", got)
+	}
+}
+
+func TestUncommittedFileCountNotARepo(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := UncommittedFileCount(context.Background(), dir); err == nil {
+		t.Error("UncommittedFileCount() error = nil for a non-repo directory, want an error")
+	}
+}

@@ -13,6 +13,8 @@ function fakeDeps(opts: {
   // deno-lint-ignore no-explicit-any
   session?: { data?: any; error?: any };
   // deno-lint-ignore no-explicit-any
+  project?: { data?: any; error?: any };
+  // deno-lint-ignore no-explicit-any
   member?: { data?: any; error?: any };
   // deno-lint-ignore no-explicit-any
   owner?: { data?: any; error?: any };
@@ -46,6 +48,25 @@ function fakeDeps(opts: {
                           head_sha: "a".repeat(40),
                           claude_code_version: "2.1.0",
                           status: "live",
+                          last_activity_at: "2026-01-01T18:42:00Z",
+                        },
+                        error: null,
+                      },
+                    ),
+                }),
+              }),
+            };
+          }
+          if (table === "projects") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve(
+                      opts.project ?? {
+                        data: {
+                          name: "acme-api",
+                          git_remote: "github.com/acme/api",
                         },
                         error: null,
                       },
@@ -274,6 +295,20 @@ Deno.test("returns session metadata including the owner's github login", async (
   assertEquals(body.session.headSha, "a".repeat(40));
   assertEquals(body.session.claudeCodeVersion, "2.1.0");
   assertEquals(body.session.status, "live");
+  assertEquals(body.session.projectName, "acme-api");
+  assertEquals(body.session.gitRemote, "github.com/acme/api");
+  assertEquals(body.session.lastActivityAt, "2026-01-01T18:42:00Z");
+});
+
+Deno.test("surfaces a project lookup failure as 500", async () => {
+  const res = await handle(
+    req({ sessionId: SESSION_ID }),
+    fakeDeps({
+      user: fakeUser(),
+      project: { data: null, error: { code: "XXXXX", message: "boom" } },
+    }),
+  );
+  assertEquals(res.status, 500);
 });
 
 Deno.test("chunks come back in order with a signed download token each, no raw signed url", async () => {

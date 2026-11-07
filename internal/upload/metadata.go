@@ -63,13 +63,25 @@ var (
 	claudeVersionAt time.Time
 )
 
-// cachedClaudeVersion returns "claude --version"'s output, re-running it
-// at most once per claudeVersionCacheTTL. Shared across every Uploader
-// instance in the process — the version is a property of the machine,
-// not of any one session, so there's nothing to gain from caching it per
-// session. A failed exec (e.g. a transient PATH issue) keeps the last
-// known-good value rather than blanking it out, and is retried on the
-// very next call rather than caching the failure for a day.
+// cachedClaudeVersion returns "claude --version"'s own version token
+// (e.g. "2.1.263" out of the real "2.1.263 (Claude Code)" output —
+// verified against a live, pinned Claude Code run), re-running the
+// command at most once per claudeVersionCacheTTL. Shared across every
+// Uploader instance in the process — the version is a property of the
+// machine, not of any one session, so there's nothing to gain from
+// caching it per session. A failed exec (e.g. a transient PATH issue)
+// keeps the last known-good value rather than blanking it out, and is
+// retried on the very next call rather than caching the failure for a
+// day.
+//
+// Returning just the bare token, not the full descriptive line, matters
+// beyond display: CO-211's pull.ParseVersion/NeedsVersionWarning parse
+// this exact stored value back out of a session's manifest to compare
+// against the puller's own machine (pull.LocalClaudeVersion extracts
+// the same token the same way) — storing the full "X.Y.Z (Claude Code)"
+// line here would make every comparison report unparseable and warn
+// unconditionally, defeating the whole point of a major/minor-only
+// warning.
 func cachedClaudeVersion(ctx context.Context) string {
 	claudeVersionMu.Lock()
 	defer claudeVersionMu.Unlock()
@@ -86,7 +98,12 @@ func cachedClaudeVersion(ctx context.Context) string {
 		return claudeVersion
 	}
 
-	claudeVersion = strings.TrimSpace(string(out))
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return claudeVersion
+	}
+
+	claudeVersion = fields[0]
 	claudeVersionAt = time.Now()
 	return claudeVersion
 }

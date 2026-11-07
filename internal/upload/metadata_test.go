@@ -108,8 +108,8 @@ func TestCachedClaudeVersionReadsRealOutput(t *testing.T) {
 	fakeClaudeOnPath(t, "1.2.3 (Claude Code)")
 
 	got := cachedClaudeVersion(context.Background())
-	if got != "1.2.3 (Claude Code)" {
-		t.Errorf("cachedClaudeVersion() = %q, want %q", got, "1.2.3 (Claude Code)")
+	if got != "1.2.3" {
+		t.Errorf("cachedClaudeVersion() = %q, want just the version token %q", got, "1.2.3")
 	}
 }
 

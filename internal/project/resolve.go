@@ -131,6 +131,22 @@ func HeadSHA(ctx context.Context, cwd string) (string, error) {
 	return gitOutput(ctx, cwd, "rev-parse", "HEAD")
 }
 
+// UncommittedFileCount counts the files `git status --porcelain` reports
+// as modified, staged, or untracked in the repository/worktree at dir —
+// CO-211's pull header ("3 uncommitted files"). Each line is one file
+// regardless of its two-letter status code, including an untracked
+// file ("??").
+func UncommittedFileCount(ctx context.Context, dir string) (int, error) {
+	out, err := gitOutput(ctx, dir, "status", "--porcelain")
+	if err != nil {
+		return 0, err
+	}
+	if out == "" {
+		return 0, nil
+	}
+	return len(strings.Split(out, "\n")), nil
+}
+
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
 	defer cancel()

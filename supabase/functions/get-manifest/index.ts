@@ -106,7 +106,7 @@ export async function handle(
   const { data: session, error: sessionErr } = await admin
     .from("sessions")
     .select(
-      "project_id, user_id, original_cwd, branch, head_sha, claude_code_version, status",
+      "project_id, user_id, original_cwd, branch, head_sha, claude_code_version, status, last_activity_at",
     )
     .eq("id", input.sessionId)
     .maybeSingle();
@@ -127,6 +127,22 @@ export async function handle(
   }
   if (!hasMinRole(role, "resumer")) {
     return errorResponse(403, "forbidden");
+  }
+
+  // CO-211 needs the project's name and git remote to locate or clone a
+  // local checkout before it can restore a worktree — get-manifest is
+  // where every other "everything needed to rebuild this session" field
+  // already lives (this function's own doc comment), so it's the
+  // natural place for these too, rather than a second round trip
+  // through list-sessions just for these two columns.
+  const { data: project, error: projectErr } = await admin
+    .from("projects")
+    .select("name, git_remote")
+    .eq("id", session.project_id)
+    .maybeSingle();
+  if (projectErr || !project) {
+    console.error("get-manifest: project lookup failed", projectErr?.code);
+    return errorResponse(500, "internal_error");
   }
 
   const { data: owner, error: ownerErr } = await admin.auth.admin
@@ -216,12 +232,15 @@ export async function handle(
       session: {
         id: input.sessionId,
         projectId: session.project_id,
+        projectName: project.name,
+        gitRemote: project.git_remote,
         ownerLogin,
         originalCwd: session.original_cwd,
         branch: session.branch,
         headSha: session.head_sha,
         claudeCodeVersion: session.claude_code_version,
         status: session.status,
+        lastActivityAt: session.last_activity_at,
       },
       chunks,
       snapshot,
