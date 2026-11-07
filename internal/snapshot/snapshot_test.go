@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -94,34 +95,87 @@ func contains(items []string, want string) bool {
 	return false
 }
 
+// storagePathPrefix mirrors the real path api.Client.StorageUploadURL
+// builds, same as internal/upload's own test fake — this fake must
+// match it exactly, since the real client is what constructs the PUT
+// URL, not anything a fake register/sign response returns.
+const storagePathPrefix = "/storage/v1/object/upload/sign/carryon-sessions/"
+
 type fakeSnapshotBackend struct {
-	mu    sync.Mutex
-	calls []map[string]any
-	fail  bool
+	mu              sync.Mutex
+	calls           []map[string]any // register-snapshot
+	signCalls       []map[string]any // sign-snapshot-bundle
+	uploadedBundles map[string][]byte
+	fail            bool
 }
 
 func (b *fakeSnapshotBackend) server() *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/functions/v1/register-snapshot", b.handleRegister)
+	mux.HandleFunc("/functions/v1/sign-snapshot-bundle", b.handleSign)
+	mux.HandleFunc(storagePathPrefix, b.handlePut)
+	return httptest.NewServer(mux)
+}
 
-		b.mu.Lock()
-		b.calls = append(b.calls, body)
-		fail := b.fail
-		b.mu.Unlock()
+func (b *fakeSnapshotBackend) handleRegister(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&body)
 
-		if fail {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
-	}))
+	b.mu.Lock()
+	b.calls = append(b.calls, body)
+	fail := b.fail
+	b.mu.Unlock()
+
+	if fail {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+func (b *fakeSnapshotBackend) handleSign(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	b.mu.Lock()
+	b.signCalls = append(b.signCalls, body)
+	b.mu.Unlock()
+
+	sessionID, _ := body["sessionId"].(string)
+	seq, _ := body["seq"].(float64)
+	objectKey := fmt.Sprintf("p1/u1/%s/code-%d.bundle", sessionID, int(seq))
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"uploadToken": "fake-token-for-" + objectKey,
+		"objectKey":   objectKey,
+	})
+}
+
+func (b *fakeSnapshotBackend) handlePut(w http.ResponseWriter, r *http.Request) {
+	objectKey := strings.TrimPrefix(r.URL.Path, storagePathPrefix)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	b.mu.Lock()
+	if b.uploadedBundles == nil {
+		b.uploadedBundles = map[string][]byte{}
+	}
+	b.uploadedBundles[objectKey] = data
+	b.mu.Unlock()
+	w.WriteHeader(http.StatusOK)
 }
 
 func (b *fakeSnapshotBackend) callCount() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return len(b.calls)
+}
+
+func (b *fakeSnapshotBackend) signCallCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.signCalls)
 }
 
 func newTestSnapshotter(t *testing.T, srv *httptest.Server) *Snapshotter {
@@ -132,6 +186,7 @@ func newTestSnapshotter(t *testing.T, srv *httptest.Server) *Snapshotter {
 		TokenSource:  func(context.Context) (string, error) { return "fake-token", nil },
 		CurrentUser:  func(context.Context) (string, error) { return "ali", nil },
 		StateDir:     filepath.Join(t.TempDir(), "state"),
+		RepoStateDir: filepath.Join(t.TempDir(), "repo-state"),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -387,6 +442,7 @@ func TestMaybeSnapshotRateLimitsToFiveMinutesUnlessFinal(t *testing.T) {
 		TokenSource:  func(context.Context) (string, error) { return "tok", nil },
 		CurrentUser:  func(context.Context) (string, error) { return "ali", nil },
 		StateDir:     filepath.Join(t.TempDir(), "state"),
+		RepoStateDir: filepath.Join(t.TempDir(), "repo-state"),
 		now:          clock.Now,
 	})
 	if err != nil {
@@ -470,6 +526,168 @@ func TestMaybeSnapshotNoRepoIsAQuietNoOp(t *testing.T) {
 	}
 }
 
+// installRejectingPreReceiveHook installs a real pre-receive hook on
+// bareRepoDir that rejects any push to refs/carryon/* (exit 1) and
+// allows everything else — exactly the CO-202 testing point scenario
+// ("a local bare remote with a pre-receive hook rejecting
+// refs/carryon/*"). It also counts invocations (one per push attempt,
+// regardless of how many refs that push touched) to a file the test can
+// inspect, so "the fallback is remembered for 24h" can be verified by
+// asserting the hook was NOT invoked again rather than just that the
+// push "succeeded" some other way.
+func installRejectingPreReceiveHook(t *testing.T, bareRepoDir string) (counterPath string) {
+	t.Helper()
+	counterPath = filepath.Join(t.TempDir(), "hook-invocations")
+	script := "#!/bin/sh\n" +
+		"echo x >> " + counterPath + "\n" +
+		"while read oldrev newrev refname; do\n" +
+		"  case \"$refname\" in\n" +
+		"    refs/carryon/*) echo \"rejected: custom refs not allowed\" >&2; exit 1 ;;\n" +
+		"  esac\n" +
+		"done\n" +
+		"exit 0\n"
+	path := filepath.Join(bareRepoDir, "hooks", "pre-receive")
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil { // #nosec G306 -- test fixture, needs +x
+		t.Fatalf("writing pre-receive hook: %v", err)
+	}
+	return counterPath
+}
+
+func hookInvocationCount(t *testing.T, counterPath string) int {
+	t.Helper()
+	data, err := os.ReadFile(counterPath)
+	if os.IsNotExist(err) {
+		return 0
+	}
+	if err != nil {
+		t.Fatalf("reading hook counter: %v", err)
+	}
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return 0
+	}
+	return len(strings.Split(trimmed, "\n"))
+}
+
+func TestMaybeSnapshotFallsBackToBundleWhenPushIsRejected(t *testing.T) {
+	remoteDir := t.TempDir()
+	runGitCmd(t, remoteDir, "init", "--quiet", "--bare")
+	counterPath := installRejectingPreReceiveHook(t, remoteDir)
+
+	repoDir := t.TempDir()
+	runGitCmd(t, repoDir, "init", "--quiet")
+	runGitCmd(t, repoDir, "config", "user.email", "test@devminified.com")
+	runGitCmd(t, repoDir, "config", "user.name", "Carryon Test")
+	runGitCmd(t, repoDir, "remote", "add", "origin", remoteDir)
+	write(t, filepath.Join(repoDir, "README.md"), "hello\n")
+	runGitCmd(t, repoDir, "add", "README.md")
+	runGitCmd(t, repoDir, "commit", "--quiet", "-m", "initial")
+
+	backend := &fakeSnapshotBackend{}
+	srv := backend.server()
+	defer srv.Close()
+	s := newTestSnapshotter(t, srv)
+
+	write(t, filepath.Join(repoDir, "new.txt"), "first change\n")
+	if err := s.MaybeSnapshot(context.Background(), "sess1", repoDir, true); err != nil {
+		t.Fatalf("MaybeSnapshot() #1 error = %v", err)
+	}
+
+	if hookInvocationCount(t, counterPath) != 1 {
+		t.Fatalf("hook invoked %d times, want 1 (the rejected push attempt)", hookInvocationCount(t, counterPath))
+	}
+	if backend.signCallCount() != 1 {
+		t.Fatalf("sign-snapshot-bundle called %d times, want 1", backend.signCallCount())
+	}
+	if backend.callCount() != 1 {
+		t.Fatalf("register-snapshot called %d times, want 1", backend.callCount())
+	}
+	call := backend.calls[0]
+	if _, hasWipRef := call["wipRef"]; hasWipRef {
+		t.Errorf("register-snapshot call has wipRef = %v, want it absent on the bundle fallback path", call["wipRef"])
+	}
+
+	// Second snapshot, same repo: the rejection should be remembered —
+	// no second push attempt (hook count stays at 1) even though
+	// something genuinely changed again.
+	write(t, filepath.Join(repoDir, "another.txt"), "second change\n")
+	if err := s.MaybeSnapshot(context.Background(), "sess1", repoDir, true); err != nil {
+		t.Fatalf("MaybeSnapshot() #2 error = %v", err)
+	}
+	if got := hookInvocationCount(t, counterPath); got != 1 {
+		t.Errorf("hook invoked %d times after a second snapshot, want still 1 (fallback remembered for 24h)", got)
+	}
+	if backend.signCallCount() != 2 {
+		t.Errorf("sign-snapshot-bundle called %d times, want 2 (both snapshots used the bundle path)", backend.signCallCount())
+	}
+}
+
+func TestBundleAppliesOnAFreshCloneWithTheSameTreeSHA(t *testing.T) {
+	repoDir := setupRepoWithRemote(t) // origin here is a real, non-rejecting bare repo
+	write(t, filepath.Join(repoDir, "new.txt"), "content\n")
+	runGitCmd(t, repoDir, "add", "new.txt")
+	runGitCmd(t, repoDir, "commit", "--quiet", "-m", "c2")
+	commitSHA := runGitCmdOutput(t, repoDir, "rev-parse", "HEAD")
+	wantTree := runGitCmdOutput(t, repoDir, "rev-parse", "HEAD^{tree}")
+
+	bundlePath, cleanup, err := createBundle(context.Background(), repoDir, commitSHA, "origin", "sess1")
+	if err != nil {
+		t.Fatalf("createBundle() error = %v", err)
+	}
+	defer cleanup()
+
+	cloneDir := t.TempDir()
+	runGitCmd(t, cloneDir, "init", "--quiet")
+	runGitCmd(t, cloneDir, "fetch", bundlePath, bundleTmpRef("sess1"))
+	fetchedSHA := runGitCmdOutput(t, cloneDir, "rev-parse", "FETCH_HEAD")
+	if fetchedSHA != commitSHA {
+		t.Fatalf("fetched commit = %q, want %q", fetchedSHA, commitSHA)
+	}
+	gotTree := runGitCmdOutput(t, cloneDir, "rev-parse", fetchedSHA+"^{tree}")
+	if gotTree != wantTree {
+		t.Errorf("fetched tree = %q, want %q", gotTree, wantTree)
+	}
+
+	// The temp ref must never linger in the source repo once bundling
+	// is done.
+	refs := runGitCmdOutput(t, repoDir, "for-each-ref", "refs/carryon-tmp")
+	if refs != "" {
+		t.Errorf("temp ref still exists after createBundle(): %q", refs)
+	}
+}
+
+func TestBundleSizeIsProportionalToChangedObjectsNotWholeRepo(t *testing.T) {
+	repoDir := setupRepoWithRemote(t)
+
+	// A large *tracked* commit, pushed to origin — part of the base
+	// both the repo and the remote already share.
+	big := strings.Repeat("x", 2*1024*1024) // 2MB, already on the remote
+	write(t, filepath.Join(repoDir, "big-tracked.bin"), big)
+	runGitCmd(t, repoDir, "add", "big-tracked.bin")
+	runGitCmd(t, repoDir, "commit", "--quiet", "-m", "add big tracked file")
+	runGitCmd(t, repoDir, "push", "--quiet", "origin", "HEAD:refs/heads/main")
+
+	// A tiny additional change, not yet on the remote.
+	write(t, filepath.Join(repoDir, "tiny.txt"), "small change\n")
+	runGitCmd(t, repoDir, "add", "tiny.txt")
+	runGitCmd(t, repoDir, "commit", "--quiet", "-m", "tiny change")
+	commitSHA := runGitCmdOutput(t, repoDir, "rev-parse", "HEAD")
+
+	bundlePath, cleanup, err := createBundle(context.Background(), repoDir, commitSHA, "origin", "sess1")
+	if err != nil {
+		t.Fatalf("createBundle() error = %v", err)
+	}
+	defer cleanup()
+
+	info, err := os.Stat(bundlePath)
+	if err != nil {
+		t.Fatalf("stat bundle: %v", err)
+	}
+	if info.Size() > 10*1024 { // the tiny change's objects, not anywhere near the 2MB tracked file
+		t.Errorf("bundle size = %d bytes, want well under 10KB (proportional to the one small change, not the 2MB file already on the remote)", info.Size())
+	}
+}
+
 func TestNewValidatesRequiredFields(t *testing.T) {
 	validClientSource := func() (*api.Client, error) { return api.NewClient("http://local", "key"), nil }
 	validTokenSource := func(context.Context) (string, error) { return "tok", nil }
@@ -478,16 +696,19 @@ func TestNewValidatesRequiredFields(t *testing.T) {
 	if _, err := New(Config{}); err == nil {
 		t.Error("New(Config{}) = nil error, want an error (missing required fields)")
 	}
-	if _, err := New(Config{TokenSource: validTokenSource, CurrentUser: validCurrentUser, StateDir: t.TempDir()}); err == nil {
+	if _, err := New(Config{TokenSource: validTokenSource, CurrentUser: validCurrentUser, StateDir: t.TempDir(), RepoStateDir: t.TempDir()}); err == nil {
 		t.Error("New() without ClientSource = nil error, want an error")
 	}
-	if _, err := New(Config{ClientSource: validClientSource, CurrentUser: validCurrentUser, StateDir: t.TempDir()}); err == nil {
+	if _, err := New(Config{ClientSource: validClientSource, CurrentUser: validCurrentUser, StateDir: t.TempDir(), RepoStateDir: t.TempDir()}); err == nil {
 		t.Error("New() without TokenSource = nil error, want an error")
 	}
-	if _, err := New(Config{ClientSource: validClientSource, TokenSource: validTokenSource, StateDir: t.TempDir()}); err == nil {
+	if _, err := New(Config{ClientSource: validClientSource, TokenSource: validTokenSource, StateDir: t.TempDir(), RepoStateDir: t.TempDir()}); err == nil {
 		t.Error("New() without CurrentUser = nil error, want an error")
 	}
-	if _, err := New(Config{ClientSource: validClientSource, TokenSource: validTokenSource, CurrentUser: validCurrentUser}); err == nil {
+	if _, err := New(Config{ClientSource: validClientSource, TokenSource: validTokenSource, CurrentUser: validCurrentUser, RepoStateDir: t.TempDir()}); err == nil {
 		t.Error("New() without StateDir = nil error, want an error")
+	}
+	if _, err := New(Config{ClientSource: validClientSource, TokenSource: validTokenSource, CurrentUser: validCurrentUser, StateDir: t.TempDir()}); err == nil {
+		t.Error("New() without RepoStateDir = nil error, want an error")
 	}
 }

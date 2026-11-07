@@ -66,14 +66,22 @@ func RemoteName(ctx context.Context, cwd string) (string, error) {
 	return first, nil
 }
 
-// ResolveRemote finds the canonical git remote for the repository
-// containing cwd (CO-108): resolves the repo's toplevel, picks the
-// remote RemoteName would (origin, falling back to the first configured
-// remote), and normalizes its URL with NormalizeRemote.
+// RemoteURL returns the raw, non-normalized URL configured for the
+// remote RemoteName would pick for cwd's repository. CO-202's snapshot
+// fallback state is keyed by this directly, not ResolveRemote's
+// canonical form — that bookkeeping is purely local (never compared
+// against another machine's spelling of the same remote, unlike
+// project-registration matching), so it only needs to be stable for
+// this one repo's own git config, and using the raw URL means it still
+// works for a remote shape NormalizeRemote doesn't recognize (verified
+// against a real local bare-path remote, which NormalizeRemote rejects
+// as an "unrecognized remote format" — a shape that can't occur for a
+// real GitHub/GitLab/Bitbucket remote, but there's no reason this
+// bookkeeping should depend on that recognition succeeding at all).
 //
 // Returns ErrNoRepo if cwd isn't inside a git repository, or ErrNoRemote
 // if the repository has no remotes at all.
-func ResolveRemote(ctx context.Context, cwd string) (string, error) {
+func RemoteURL(ctx context.Context, cwd string) (string, error) {
 	toplevel, err := Toplevel(ctx, cwd)
 	if err != nil {
 		return "", err
@@ -88,7 +96,21 @@ func ResolveRemote(ctx context.Context, cwd string) (string, error) {
 	if err != nil {
 		return "", ErrNoRemote
 	}
+	return raw, nil
+}
 
+// ResolveRemote finds the canonical git remote for the repository
+// containing cwd (CO-108): RemoteURL's raw form, normalized with
+// NormalizeRemote so it matches however a registered project's remote
+// is stored server-side.
+//
+// Returns ErrNoRepo if cwd isn't inside a git repository, or ErrNoRemote
+// if the repository has no remotes at all.
+func ResolveRemote(ctx context.Context, cwd string) (string, error) {
+	raw, err := RemoteURL(ctx, cwd)
+	if err != nil {
+		return "", err
+	}
 	return NormalizeRemote(raw)
 }
 
