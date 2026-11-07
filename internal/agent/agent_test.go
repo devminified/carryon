@@ -601,7 +601,13 @@ func TestAgentLongOfflineOutageCapsBackoffAndEventuallyDelivers(t *testing.T) {
 
 	for i := 0; i < 50; i++ {
 		before := uploader.count("s1")
-		waitFor(t, 1*time.Second, func() bool { return uploader.count("s1") > before })
+		// 1s was too tight on a loaded/throttled CI runner (observed
+		// flaking twice in a row on GitHub's hosted macOS runner under
+		// -race, never locally) — any one of 50 iterations stalling
+		// past a hair-trigger budget shouldn't fail a test that isn't
+		// actually timing-sensitive; the real assertion is "eventually
+		// fires again after the clock jump," not "within 1s of it."
+		waitFor(t, 5*time.Second, func() bool { return uploader.count("s1") > before })
 		time.Sleep(2 * time.Millisecond) // let handleResult set the next dueAt
 		// Jump past even the maximum possible jittered delay (cap *
 		// 1.5) — proves the cap holds no matter how long the simulated
