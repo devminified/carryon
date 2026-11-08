@@ -284,7 +284,7 @@ func (s *Snapshotter) uploadBundle(ctx context.Context, toplevel, commitSHA, rem
 		return fmt.Errorf("signing bundle upload: %w", err)
 	}
 
-	return s.put(ctx, client.StorageUploadURL(signed.ObjectKey, signed.UploadToken), data)
+	return s.put(ctx, client.StorageUploadURL(signed.Bucket, signed.ObjectKey, signed.UploadToken), data)
 }
 
 func (s *Snapshotter) put(ctx context.Context, url string, data []byte) error {

@@ -57,7 +57,7 @@ carryon/
 │       ├── sync-github-teams/           GitHub App auth + team membership → project_members reconciliation (CO-303)
 │       ├── confirm-pull/                writes audit_log's "pull_complete" row once a real pull fully succeeds (CO-304) — not in Doc's original RPC list, see edge-functions.md
 │       ├── .env.example                 Edge Function secrets beyond Supabase's own auto-provided ones (CO-303: GITHUB_APP_*, CRON_SECRET) — supabase/functions/.env (gitignored) for local dev
-│       └── _shared/                    schema validation, has_role helper, Resend/Slack clients, github.ts (GitHub App JWT + installation token + team members, CO-303)
+│       └── _shared/                    schema validation, has_role helper, Resend/Slack clients, github.ts (GitHub App JWT + installation token + team members, CO-303), storage.ts (resolveBucket — a project's dedicated bucket, or the shared default, CO-305)
 │
 ├── web/                                Next.js app
 │   ├── next.config.ts

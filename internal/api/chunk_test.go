@@ -148,8 +148,17 @@ func TestStorageUploadURLUsesTheClientsOwnBaseURL(t *testing.T) {
 	// own signed-URL string (it can be Docker-internal in local dev) —
 	// always build from the client's own, already-correct base URL.
 	c := NewClient("http://127.0.0.1:54421", "anon-key")
-	got := c.StorageUploadURL("p1/main/s1/chunk-0.jsonl.zst", "tok123")
+	got := c.StorageUploadURL("carryon-sessions", "p1/main/s1/chunk-0.jsonl.zst", "tok123")
 	want := "http://127.0.0.1:54421/storage/v1/object/upload/sign/carryon-sessions/p1/main/s1/chunk-0.jsonl.zst?token=tok123"
+	if got != want {
+		t.Errorf("StorageUploadURL() = %q, want %q", got, want)
+	}
+}
+
+func TestStorageUploadURLUsesAProjectsDedicatedBucket(t *testing.T) {
+	c := NewClient("http://127.0.0.1:54421", "anon-key")
+	got := c.StorageUploadURL("client-x-bucket", "p1/main/s1/chunk-0.jsonl.zst", "tok123")
+	want := "http://127.0.0.1:54421/storage/v1/object/upload/sign/client-x-bucket/p1/main/s1/chunk-0.jsonl.zst?token=tok123"
 	if got != want {
 		t.Errorf("StorageUploadURL() = %q, want %q", got, want)
 	}

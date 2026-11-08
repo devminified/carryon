@@ -23,11 +23,17 @@
 // verified against a live instance that createSignedUploadUrl has no
 // expiresIn option, documented in redaction.md as the one justified
 // exception to this project's normal 5-minute signed-URL rule.
+//
+// CO-305: which bucket a project's chunks live in is resolved here
+// (resolveBucket) and returned to the caller alongside the token — the
+// default shared bucket for most projects, or a dedicated one for a
+// client whose contract requires physical separation.
 
 import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";
 import { chunkObjectKey } from "../_shared/chunks.ts";
 import { memberRole } from "../_shared/membership.ts";
+import { resolveBucket } from "../_shared/storage.ts";
 import {
   adminClient as realAdminClient,
   requireUser as realRequireUser,
@@ -74,8 +80,6 @@ const defaultDeps: Deps = {
   requireUser: realRequireUser,
 };
 
-const BUCKET = "carryon-sessions";
-
 export async function handle(
   req: Request,
   deps: Deps = defaultDeps,
@@ -113,6 +117,20 @@ export async function handle(
     return errorResponse(403, "forbidden");
   }
 
+  // CO-305: a project normally shares the default bucket; a client
+  // with a dedicated one (projects.bucket) gets its chunks stored
+  // there instead.
+  const { data: project, error: projectErr } = await admin
+    .from("projects")
+    .select("bucket")
+    .eq("id", input.projectId)
+    .maybeSingle();
+  if (projectErr) {
+    console.error("register-chunk: project lookup failed", projectErr.code);
+    return errorResponse(500, "internal_error");
+  }
+  const bucket = resolveBucket(project);
+
   // Insert-if-missing only (ignoreDuplicates) — a session's identifying
   // fields are set once, on its first chunk, and never overwritten by a
   // later one. confirm-chunk (CO-111) owns the fields that genuinely
@@ -146,7 +164,7 @@ export async function handle(
   );
 
   const { data: signed, error: signErr } = await admin.storage
-    .from(BUCKET)
+    .from(bucket)
     .createSignedUploadUrl(objectKey, { upsert: true });
   if (signErr || !signed) {
     console.error("register-chunk: signing upload url failed", signErr);
@@ -163,7 +181,7 @@ export async function handle(
   // against a live local instance, not assumed — found while building
   // CO-110, when a real PUT from outside Docker failed DNS resolution on
   // "kong".
-  return json({ uploadToken: signed.token, objectKey }, 200);
+  return json({ uploadToken: signed.token, objectKey, bucket }, 200);
 }
 
 if (import.meta.main) {

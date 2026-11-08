@@ -25,9 +25,11 @@ type SessionMeta struct {
 	LastActivityAt    time.Time `json:"lastActivityAt"`
 }
 
-// ManifestChunk is one of get-manifest's ordered chunks. ObjectKey and
-// DownloadToken build the actual GET URL via Client.StorageDownloadURL
-// — never trust a signed URL an Edge Function might return directly.
+// ManifestChunk is one of get-manifest's ordered chunks. ObjectKey,
+// Bucket (CO-305 — the default shared bucket, or a project's own
+// dedicated one) and DownloadToken build the actual GET URL via
+// Client.StorageDownloadURL — never trust a signed URL an Edge
+// Function might return directly.
 type ManifestChunk struct {
 	StreamID      string `json:"streamId"`
 	Seq           int    `json:"seq"`
@@ -36,11 +38,14 @@ type ManifestChunk struct {
 	SHA256        string `json:"sha256"`
 	ObjectKey     string `json:"objectKey"`
 	DownloadToken string `json:"downloadToken"`
+	Bucket        string `json:"bucket"`
 }
 
 // ManifestSnapshot is get-manifest's latest code_snapshots row: either a
-// hidden git ref (WipRef set) or a bundle fallback (ObjectKey/
-// DownloadToken set — CO-202).
+// hidden git ref (WipRef set) or a bundle fallback (ObjectKey/Bucket/
+// DownloadToken set — CO-202). Bucket is only meaningful on the bundle
+// path (CO-305) — empty when WipRef is set, since there's no Storage
+// object to resolve a bucket for.
 type ManifestSnapshot struct {
 	Seq           int    `json:"seq"`
 	HeadSHA       string `json:"headSha"`
@@ -48,6 +53,7 @@ type ManifestSnapshot struct {
 	WipRef        string `json:"wipRef,omitempty"`
 	ObjectKey     string `json:"objectKey,omitempty"`
 	DownloadToken string `json:"downloadToken,omitempty"`
+	Bucket        string `json:"bucket,omitempty"`
 }
 
 // Manifest is get-manifest's full response (CO-203). Snapshot is nil

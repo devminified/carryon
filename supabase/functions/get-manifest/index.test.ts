@@ -27,6 +27,7 @@ function fakeDeps(opts: {
   // deno-lint-ignore no-explicit-any
   audit?: { error?: any };
   onAudit?: (row: unknown) => void;
+  onStorageFrom?: (bucket: string) => void;
 }): Deps {
   return {
     requireUser: () => Promise.resolve(opts.user as never),
@@ -67,6 +68,7 @@ function fakeDeps(opts: {
                         data: {
                           name: "acme-api",
                           git_remote: "github.com/acme/api",
+                          bucket: null,
                         },
                         error: null,
                       },
@@ -159,9 +161,7 @@ function fakeDeps(opts: {
         },
         storage: {
           from(bucket: string) {
-            if (bucket !== "carryon-sessions") {
-              throw new Error(`unexpected bucket ${bucket}`);
-            }
+            opts.onStorageFrom?.(bucket);
             return {
               createSignedUrl: (path: string) =>
                 Promise.resolve(
@@ -356,6 +356,39 @@ Deno.test("chunks come back in order with a signed download token each, no raw s
         `chunk ${c.seq} leaked the Edge Function's own signed url (host-baked, unreachable from the laptop)`,
       );
     }
+    if (c.bucket !== "carryon-sessions") {
+      throw new Error(`chunk ${c.seq} has unexpected bucket ${c.bucket}`);
+    }
+  }
+});
+
+Deno.test("CO-305: signs chunk and snapshot downloads against a project's dedicated bucket", async () => {
+  const seen: string[] = [];
+  const res = await handle(
+    req({ sessionId: SESSION_ID }),
+    fakeDeps({
+      user: fakeUser(),
+      project: {
+        data: {
+          name: "acme-api",
+          git_remote: "github.com/acme/api",
+          bucket: "client-x-bucket",
+        },
+        error: null,
+      },
+      onStorageFrom: (bucket) => seen.push(bucket),
+    }),
+  );
+  assertEquals(res.status, 200);
+  const body = await res.json();
+  for (const c of body.chunks) {
+    assertEquals(c.bucket, "client-x-bucket");
+  }
+  assertEquals(body.snapshot.bucket, undefined); // this fixture's snapshot is a ref, not a bundle
+  if (seen.some((b) => b !== "client-x-bucket")) {
+    throw new Error(
+      `expected every storage call to use client-x-bucket, got ${seen}`,
+    );
   }
 });
 
@@ -402,6 +435,7 @@ Deno.test("a bundle-path snapshot is returned with its object key and a signed d
   const body = await res.json();
   assertEquals(body.snapshot.wipRef, undefined);
   assertEquals(body.snapshot.objectKey, "p1/owner-1/s1/code-2.bundle");
+  assertEquals(body.snapshot.bucket, "carryon-sessions");
   if (
     typeof body.snapshot.downloadToken !== "string" ||
     body.snapshot.downloadToken.length === 0

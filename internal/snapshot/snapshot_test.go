@@ -147,6 +147,7 @@ func (b *fakeSnapshotBackend) handleSign(w http.ResponseWriter, r *http.Request)
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"uploadToken": "fake-token-for-" + objectKey,
 		"objectKey":   objectKey,
+		"bucket":      "carryon-sessions",
 	})
 }
 

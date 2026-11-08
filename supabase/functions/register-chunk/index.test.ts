@@ -11,11 +11,14 @@ function fakeDeps(opts: {
   // deno-lint-ignore no-explicit-any
   member?: { data?: any; error?: any };
   // deno-lint-ignore no-explicit-any
+  project?: { data?: any; error?: any };
+  // deno-lint-ignore no-explicit-any
   sessionUpsert?: { error?: any };
   // deno-lint-ignore no-explicit-any
   signedUrl?: { data?: any; error?: any };
   // deno-lint-ignore no-explicit-any
   onSessionUpsert?: (row: any) => void;
+  onStorageFrom?: (bucket: string) => void;
 }): Deps {
   return {
     requireUser: () => Promise.resolve(opts.user as never),
@@ -36,6 +39,18 @@ function fakeDeps(opts: {
               }),
             };
           }
+          if (table === "projects") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve(
+                      opts.project ?? { data: { bucket: null }, error: null },
+                    ),
+                }),
+              }),
+            };
+          }
           if (table === "sessions") {
             return {
               // deno-lint-ignore no-explicit-any
@@ -49,9 +64,7 @@ function fakeDeps(opts: {
         },
         storage: {
           from(bucket: string) {
-            if (bucket !== "carryon-sessions") {
-              throw new Error(`unexpected bucket ${bucket}`);
-            }
+            opts.onStorageFrom?.(bucket);
             return {
               createSignedUploadUrl: () =>
                 Promise.resolve(
@@ -164,6 +177,36 @@ Deno.test("upserts the session and returns a signed upload token", async () => {
     body.objectKey,
     "22222222-2222-4222-8222-222222222222/u1/11111111-1111-4111-8111-111111111111/main/chunk-0.jsonl.zst",
   );
+  assertEquals(body.bucket, "carryon-sessions");
+});
+
+Deno.test("CO-305: signs against a project's dedicated bucket when it has one", async () => {
+  let signedBucket: string | undefined;
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    member: { data: { role: "resumer" }, error: null },
+    project: { data: { bucket: "client-x-bucket" }, error: null },
+    onStorageFrom: (bucket) => {
+      signedBucket = bucket;
+    },
+  });
+
+  const res = await handle(req(validBody()), deps);
+  assertEquals(res.status, 200);
+  const body = await res.json();
+  assertEquals(body.bucket, "client-x-bucket");
+  assertEquals(signedBucket, "client-x-bucket");
+});
+
+Deno.test("surfaces a project lookup failure as 500", async () => {
+  const deps = fakeDeps({
+    user: fakeUser(),
+    member: { data: { role: "resumer" }, error: null },
+    project: { data: null, error: { code: "XXXXX", message: "boom" } },
+  });
+
+  const res = await handle(req(validBody()), deps);
+  assertEquals(res.status, 500);
 });
 
 Deno.test("passes machine/branch/headSha/claudeCodeVersion through to the session upsert", async () => {

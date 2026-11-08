@@ -344,12 +344,12 @@ func (u *Uploader) uploadChunk(ctx context.Context, session agent.Session, strea
 		return fmt.Errorf("registering chunk: %w", err)
 	}
 
-	if err := u.put(ctx, client.StorageUploadURL(reg.ObjectKey, reg.UploadToken), compressed); err != nil {
+	if err := u.put(ctx, client.StorageUploadURL(reg.Bucket, reg.ObjectKey, reg.UploadToken), compressed); err != nil {
 		reg, err = client.RegisterChunk(ctx, token, regInput)
 		if err != nil {
 			return fmt.Errorf("re-registering after a failed upload: %w", err)
 		}
-		if err := u.put(ctx, client.StorageUploadURL(reg.ObjectKey, reg.UploadToken), compressed); err != nil {
+		if err := u.put(ctx, client.StorageUploadURL(reg.Bucket, reg.ObjectKey, reg.UploadToken), compressed); err != nil {
 			return fmt.Errorf("uploading (after re-registering for a fresh URL): %w", err)
 		}
 	}

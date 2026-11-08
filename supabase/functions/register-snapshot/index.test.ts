@@ -13,6 +13,8 @@ function fakeDeps(opts: {
   // deno-lint-ignore no-explicit-any
   member?: { data?: any; error?: any };
   // deno-lint-ignore no-explicit-any
+  project?: { data?: any; error?: any };
+  // deno-lint-ignore no-explicit-any
   upsert?: { error?: any };
   // deno-lint-ignore no-explicit-any
   onUpsert?: (row: any) => void;
@@ -55,6 +57,18 @@ function fakeDeps(opts: {
               }),
             };
           }
+          if (table === "projects") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve(
+                      opts.project ?? { data: { bucket: null }, error: null },
+                    ),
+                }),
+              }),
+            };
+          }
           if (table === "code_snapshots") {
             return {
               // deno-lint-ignore no-explicit-any
@@ -67,10 +81,7 @@ function fakeDeps(opts: {
           throw new Error(`unexpected table ${table}`);
         },
         storage: {
-          from(bucket: string) {
-            if (bucket !== "carryon-sessions") {
-              throw new Error(`unexpected bucket ${bucket}`);
-            }
+          from(_bucket: string) {
             return {
               info: () =>
                 Promise.resolve(opts.info ?? { data: {}, error: null }),
@@ -191,6 +202,16 @@ Deno.test("bundle path: rejects when the bundle object is missing from storage",
   assertEquals(res.status, 409);
   const body = await res.json();
   assertEquals(body.error, "object_missing");
+});
+
+Deno.test("bundle path: surfaces a project lookup failure as 500", async () => {
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    project: { data: null, error: { code: "XXXXX", message: "boom" } },
+  });
+
+  const res = await handle(req(validBody({ wipRef: undefined })), deps);
+  assertEquals(res.status, 500);
 });
 
 Deno.test("ref path never stores an object_key", async () => {

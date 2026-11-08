@@ -38,15 +38,19 @@ type RegisterChunkInput struct {
 
 // RegisterChunkResult is register-chunk's response: a signed Storage
 // upload token (expires in a fixed 2 hours — see
-// .claude/rules/redaction.md — not the usual 5 minutes) and the object
-// key confirm-chunk will later verify. UploadToken, not a full URL — the
-// Edge Function's own signed URL bakes in its internal SUPABASE_URL
+// .claude/rules/redaction.md — not the usual 5 minutes), the object
+// key confirm-chunk will later verify, and the bucket (CO-305) the
+// token was signed against — the default shared bucket for most
+// projects, or a dedicated one for a client whose contract requires
+// physical separation. UploadToken, not a full URL — the Edge
+// Function's own signed URL bakes in its internal SUPABASE_URL
 // (unreachable from outside Docker in local dev); the token itself
 // carries no host claim, so build the actual upload URL with
 // Client.StorageUploadURL instead (see redaction.md).
 type RegisterChunkResult struct {
 	UploadToken string `json:"uploadToken"`
 	ObjectKey   string `json:"objectKey"`
+	Bucket      string `json:"bucket"`
 }
 
 // RegisterChunk calls the register-chunk Edge Function (CO-110). Returns
@@ -130,17 +134,15 @@ func IsConflict(err error) bool {
 	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict
 }
 
-// chunkBucket is the private Storage bucket chunks live in — created by
-// CO-102's migration, named identically in supabase/functions/*/index.ts's
-// own BUCKET constant.
-const chunkBucket = "carryon-sessions"
-
 // StorageUploadURL builds the actual PUT URL for a chunk's signed upload
 // token from the client's own base URL — see RegisterChunkResult's doc
 // comment for why this must never be built from an Edge Function's own
-// signed-URL string instead.
-func (c *Client) StorageUploadURL(objectKey, token string) string {
-	return fmt.Sprintf("%s/storage/v1/object/upload/sign/%s/%s?token=%s", c.baseURL, chunkBucket, objectKey, url.QueryEscape(token))
+// signed-URL string instead. bucket is always the server's own answer
+// (RegisterChunkResult.Bucket / SignSnapshotBundleResult.Bucket, CO-305)
+// — never hardcoded here, since a project can have its own dedicated
+// bucket.
+func (c *Client) StorageUploadURL(bucket, objectKey, token string) string {
+	return fmt.Sprintf("%s/storage/v1/object/upload/sign/%s/%s?token=%s", c.baseURL, bucket, objectKey, url.QueryEscape(token))
 }
 
 // StorageDownloadURL builds the actual GET URL for a chunk's (or a
@@ -149,7 +151,8 @@ func (c *Client) StorageUploadURL(objectKey, token string) string {
 // reasoning as StorageUploadURL: createSignedUrl's own signedUrl bakes
 // in the Edge Function's internal SUPABASE_URL, unreachable from the
 // laptop actually downloading the bytes (get-manifest/index.ts's
-// signDownloadToken doc comment).
-func (c *Client) StorageDownloadURL(objectKey, token string) string {
-	return fmt.Sprintf("%s/storage/v1/object/sign/%s/%s?token=%s", c.baseURL, chunkBucket, objectKey, url.QueryEscape(token))
+// signDownloadToken doc comment). bucket is always the manifest's own
+// answer (ManifestChunk.Bucket / ManifestSnapshot.Bucket, CO-305).
+func (c *Client) StorageDownloadURL(bucket, objectKey, token string) string {
+	return fmt.Sprintf("%s/storage/v1/object/sign/%s/%s?token=%s", c.baseURL, bucket, objectKey, url.QueryEscape(token))
 }

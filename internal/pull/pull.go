@@ -289,7 +289,7 @@ func downloadChunkWithRetry(ctx context.Context, client *api.Client, cfg Config,
 }
 
 func downloadOneChunk(ctx context.Context, client *api.Client, cfg Config, chunk api.ManifestChunk) ([]byte, error) {
-	url := client.StorageDownloadURL(chunk.ObjectKey, chunk.DownloadToken)
+	url := client.StorageDownloadURL(chunk.Bucket, chunk.ObjectKey, chunk.DownloadToken)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building download request: %w", err)

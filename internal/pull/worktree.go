@@ -148,7 +148,7 @@ func resolveSnapshotCommit(ctx context.Context, client *api.Client, httpClient *
 // a bare token, never the Edge Function's own signed URL (see
 // get-manifest/index.ts's signDownloadToken doc comment).
 func downloadBundle(ctx context.Context, httpClient *http.Client, client *api.Client, snap api.ManifestSnapshot) (path string, cleanup func(), err error) {
-	url := client.StorageDownloadURL(snap.ObjectKey, snap.DownloadToken)
+	url := client.StorageDownloadURL(snap.Bucket, snap.ObjectKey, snap.DownloadToken)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", nil, fmt.Errorf("building request: %w", err)
