@@ -12,6 +12,8 @@ The named RPCs: `register-session`, `register-chunk`, `confirm-chunk`, `end-sess
 
 `confirm-pull` (CO-304) is the last of these — the laptop calls it once `carryon pull` has fully succeeded, writing `audit_log`'s `"pull_complete"` row. It exists because the server has no other way to know a pull finished: chunk bytes flow straight from Storage to the laptop (I9), never through the API, so `get-manifest`'s own `"pull_manifest"` row only ever covers the *start* of a pull. Same access rule as `get-manifest` (resumer role or higher): the session-existence check stays on the service role (so a missing session reports a clean 404, not folded into the 403 a real-but-forbidden session gets), and the role check itself runs as the caller via CO-302's own `project_members` select policy.
 
+`rescan` (CO-306, built as the second real scheduled Edge Function after `sync-github-teams`) is the one function in this codebase that reads and rewrites bytes it already owns in Storage, rather than only ever handing out metadata or signed URLs — see `.claude/rules/redaction.md`'s own rescan section for the full detail (its rule-matching port in `_shared/redact.ts`, the zstd codec in `_shared/zstd.ts`, and why that's a deliberate, narrow exception to I9 rather than a violation of it: I9 is about keeping the server out of the laptop's own upload/download path, not about forbidding its own background maintenance over its own stored data with no laptop waiting on the call).
+
 ## Contract
 
 ```ts
