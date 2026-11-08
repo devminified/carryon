@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -30,6 +31,14 @@ func main() {
 	}
 
 	exePath := filepath.Join(dir, "marker-exe")
+	if runtime.GOOS == "windows" {
+		// os.Executable() (what production's checkOnce actually passes
+		// to Restart) always returns an extension-qualified path on
+		// Windows — exec.Command needs that same ".exe" suffix to find
+		// an executable with no extension in its own PATH lookup;
+		// found for real via a Windows CI failure on this exact test.
+		exePath += ".exe"
+	}
 	buildOut, err := exec.Command("go", "build", "-o", exePath, srcPath).CombinedOutput() // #nosec G204 -- fixed go-toolchain invocation, test-only
 	if err != nil {
 		t.Fatalf("building marker program: %v\n%s", err, buildOut)
