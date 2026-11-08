@@ -54,9 +54,11 @@ carryon/
 │       ├── sign-snapshot-bundle/       signs the upload URL for register-snapshot's git-bundle fallback (CO-202)
 │       ├── summarize-session/
 │       ├── rescan/                      nightly backstop secret scan + rewrite over recent chunks (CO-306)
+│       ├── purge-expired-sessions/      daily retention sweep for closed, past-retention projects (CO-307), supports {"dryRun": true}
+│       ├── delete-session/              carryon admin delete <sid> --reason's backend (CO-307)
 │       ├── sync-github-teams/           GitHub App auth + team membership → project_members reconciliation (CO-303)
 │       ├── confirm-pull/                writes audit_log's "pull_complete" row once a real pull fully succeeds (CO-304) — not in Doc's original RPC list, see edge-functions.md
-│       ├── .env.example                 Edge Function secrets beyond Supabase's own auto-provided ones (CO-303: GITHUB_APP_*, CRON_SECRET; CO-306: RESCAN_CRON_SECRET) — supabase/functions/.env (gitignored) for local dev
+│       ├── .env.example                 Edge Function secrets beyond Supabase's own auto-provided ones (CO-303: GITHUB_APP_*, CRON_SECRET; CO-306: RESCAN_CRON_SECRET; CO-307: PURGE_CRON_SECRET) — supabase/functions/.env (gitignored) for local dev
 │       └── _shared/                    schema validation, has_role helper, Resend/Slack clients, github.ts (GitHub App JWT + installation token + team members, CO-303), storage.ts (resolveBucket — a project's dedicated bucket, or the shared default, CO-305), redact.ts (hand-kept TS port of internal/redact's rule patterns, CO-306), zstd.ts (the one function that reads/rewrites chunk bytes directly, CO-306)
 │
 ├── web/                                Next.js app

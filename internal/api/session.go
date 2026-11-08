@@ -25,6 +25,17 @@ func (c *Client) ConfirmPull(ctx context.Context, accessToken, sessionID string)
 	return c.post(ctx, "confirm-pull", accessToken, body, nil)
 }
 
+// DeleteSession calls the delete-session Edge Function (CO-307):
+// `carryon admin delete <sid> --reason`. reason is mandatory — the
+// server refuses an empty or whitespace-only one (validation_failed,
+// HTTP 400). Returns an *Error satisfying IsForbidden if the caller
+// isn't an admin on the session's project, IsNotFound if sessionID
+// doesn't exist.
+func (c *Client) DeleteSession(ctx context.Context, accessToken, sessionID, reason string) error {
+	body := map[string]string{"sessionId": sessionID, "reason": reason}
+	return c.post(ctx, "delete-session", accessToken, body, nil)
+}
+
 // ListSessionsInput is list-sessions' (CO-204) optional filters — every
 // field's zero value means "don't filter on this."
 type ListSessionsInput struct {
