@@ -81,7 +81,7 @@ Deno.test("returns the configured disabled rule IDs and denylist additions", asy
   assertEquals(body.denylistAdditions, ["*.secret"]);
 });
 
-Deno.test("returns empty arrays when no config row exists yet", async () => {
+Deno.test("returns empty arrays and a null pinnedVersion when no config row exists yet", async () => {
   const res = await handle(
     req(),
     fakeDeps({ user: fakeUser(), config: { data: null, error: null } }),
@@ -90,6 +90,27 @@ Deno.test("returns empty arrays when no config row exists yet", async () => {
   const body = await res.json();
   assertEquals(body.disabledRuleIds, []);
   assertEquals(body.denylistAdditions, []);
+  assertEquals(body.pinnedVersion, null);
+});
+
+Deno.test("CO-308: returns the configured pinned version", async () => {
+  const res = await handle(
+    req(),
+    fakeDeps({
+      user: fakeUser(),
+      config: {
+        data: {
+          disabled_rule_ids: [],
+          denylist_additions: [],
+          pinned_version: "1.5.0",
+        },
+        error: null,
+      },
+    }),
+  );
+  assertEquals(res.status, 200);
+  const body = await res.json();
+  assertEquals(body.pinnedVersion, "1.5.0");
 });
 
 Deno.test("surfaces a lookup failure as 500", async () => {

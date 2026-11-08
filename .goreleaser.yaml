@@ -13,7 +13,9 @@ builds:
     env:
       - CGO_ENABLED=0
     ldflags:
-      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+      - >-
+        -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+        -X main.updatePublicKeyHex={{.Env.UPDATE_PUBLIC_KEY_HEX}}
     goos:
       - darwin
       - linux
@@ -25,6 +27,21 @@ builds:
       # NFR-09: Windows targets amd64 only.
       - goos: windows
         goarch: arm64
+  # carryon-sign-manifest (CO-308) is release-side tooling only — never
+  # shipped to a developer's laptop. Built here (not released as its
+  # own archive below) purely so CI can run it as a build step between
+  # `goreleaser build` and `goreleaser release` without a separate
+  # `go build` invocation drifting out of sync with this file's own Go
+  # toolchain/version pin.
+  - id: carryon-sign-manifest
+    main: ./cmd/carryon-sign-manifest
+    binary: carryon-sign-manifest
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
 
 archives:
   - id: carryon
@@ -38,9 +55,72 @@ archives:
       - goos: windows
         formats:
           - zip
+  # NOTE: there is deliberately no "formats: [binary]" archive entry
+  # here for the bare, unpacked binary internal/update.Stage downloads
+  # directly (no archive extraction step exists there — CO-308's own
+  # scope is the verify-before-swap mechanism, not a general-purpose
+  # archive unpacker). Tried that first; goreleaser's own "binary"
+  # format only registers a checksummed *alias* pointing at the
+  # per-target build subdirectory's file (still named "carryon" / "
+  # carryon.exe" for every platform), not a real renamed top-level
+  # copy — verified against a real snapshot build, dist/artifacts.json
+  # inspected directly. release.yml materializes real,
+  # uniquely-named copies itself instead (a handful of `cp`s), which
+  # is what carryon-sign-manifest's -asset flags and the uploaded
+  # release assets both actually use.
 
 checksum:
   name_template: "checksums.txt"
+
+# .deb packaging (CO-308). Linux-only — winget/signed-MSI (Windows) and
+# the Homebrew tap (macOS/Linux) are the other two named packaging
+# targets; see docs/co-308-fleet-rollout.md for why MSI signing and the
+# winget/tap publishing steps are external, deferred setup rather than
+# wired up here.
+nfpms:
+  - id: carryon-deb
+    ids:
+      - carryon
+    package_name: carryon
+    formats:
+      - deb
+    maintainer: "Devminified <development@devminified.com>"
+    description: >-
+      Captures every Claude Code session on a registered repo and lets
+      a teammate pull it back down and resume exactly where it left
+      off.
+    homepage: https://github.com/devminified/carryon
+    license: Proprietary
+    bindir: /usr/bin
+    scripts:
+      postinstall: packaging/deb/postinstall.sh
+
+# Homebrew tap (CO-308): `brew install devminified/tap/carryon`. The
+# devminified/homebrew-tap repository itself is a one-time, external
+# setup step this ticket deliberately deferred (see
+# docs/co-308-fleet-rollout.md) — until that repo exists and a
+# HOMEBREW_TAP_GITHUB_TOKEN secret is configured, goreleaser's own
+# publish step for this fails safely (it only runs on `goreleaser
+# release`, never on `--snapshot`/`build`, so nothing here blocks a
+# normal CI build in the meantime).
+brews:
+  - name: carryon
+    ids:
+      - carryon
+    repository:
+      owner: devminified
+      name: homebrew-tap
+    homepage: https://github.com/devminified/carryon
+    description: >-
+      Captures every Claude Code session on a registered repo and lets
+      a teammate pull it back down and resume exactly where it left
+      off.
+    license: Proprietary
+    install: |
+      bin.install "carryon"
+      system bin/"carryon", "install"
+    test: |
+      system "#{bin}/carryon", "version"
 
 snapshot:
   version_template: "{{ incpatch .Version }}-next"

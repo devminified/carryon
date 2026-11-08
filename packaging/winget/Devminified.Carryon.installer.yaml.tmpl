@@ -1,0 +1,14 @@
+PackageIdentifier: Devminified.Carryon
+PackageVersion: {{VERSION}}
+InstallerType: msi
+Scope: user
+InstallModes:
+  - interactive
+  - silent
+UpgradeBehavior: install
+Installers:
+  - Architecture: x64
+    InstallerUrl: {{BASE_URL}}/carryon_windows_amd64.msi
+    InstallerSha256: {{SHA256_WINDOWS_AMD64}}
+ManifestType: installer
+ManifestVersion: 1.6.0

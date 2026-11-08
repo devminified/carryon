@@ -1,0 +1,18 @@
+# CO-308: winget's "version manifest" — one of the 3 files a real
+# submission to microsoft/winget-pkgs needs (PackageVersion must match
+# the installer/locale manifests below exactly). {{VERSION}} is filled
+# in by packaging/winget/generate.sh for a real release; this .tmpl
+# file is never used as-is.
+#
+# Submitting this to microsoft/winget-pkgs (a PR against their public
+# repo) is the external, deferred step this ticket's own scope
+# decision left for later — see docs/co-308-fleet-rollout.md. This
+# file's own shape was NOT validated against winget's live schema or
+# `winget validate` (no network access during this ticket's build);
+# that's the one real verification gap to close before the first
+# actual submission.
+PackageIdentifier: Devminified.Carryon
+PackageVersion: {{VERSION}}
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0

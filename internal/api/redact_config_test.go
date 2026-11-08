@@ -35,6 +35,46 @@ func TestGetConfigParsesTheResponse(t *testing.T) {
 	}
 }
 
+func TestGetConfigParsesAPinnedVersion(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"disabledRuleIds":   []string{},
+			"denylistAdditions": []string{},
+			"pinnedVersion":     "1.5.0",
+		})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "anon-key")
+	got, err := c.GetConfig(context.Background(), "access-token")
+	if err != nil {
+		t.Fatalf("GetConfig() error = %v", err)
+	}
+	if got.PinnedVersion != "1.5.0" {
+		t.Errorf("PinnedVersion = %q, want %q", got.PinnedVersion, "1.5.0")
+	}
+}
+
+func TestGetConfigParsesANullPinnedVersionAsEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"disabledRuleIds":   []string{},
+			"denylistAdditions": []string{},
+			"pinnedVersion":     nil,
+		})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "anon-key")
+	got, err := c.GetConfig(context.Background(), "access-token")
+	if err != nil {
+		t.Fatalf("GetConfig() error = %v", err)
+	}
+	if got.PinnedVersion != "" {
+		t.Errorf("PinnedVersion = %q, want empty (no pin)", got.PinnedVersion)
+	}
+}
+
 func TestGetConfigUnauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

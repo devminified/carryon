@@ -8,9 +8,14 @@ import "context"
 // field for a raw regex pattern — get-config can narrow or extend
 // coverage, never supply code this binary would execute. See
 // internal/redact's Rule doc comment.
+//
+// PinnedVersion (CO-308) is otherwise unrelated to redaction — see
+// get-config/index.ts's own doc comment for why it lives on this same
+// response anyway (the ticket's own instruction). "" means no pin.
 type RedactionConfig struct {
 	DisabledRuleIDs   []string `json:"disabledRuleIds"`
 	DenylistAdditions []string `json:"denylistAdditions"`
+	PinnedVersion     string   `json:"pinnedVersion"`
 }
 
 // GetConfig calls the get-config Edge Function (CO-301). Every

@@ -56,6 +56,14 @@ type lazyAPI struct {
 	cachedRedactConfig  redact.Config
 	redactConfigAt      time.Time
 	redactConfigFetched bool
+
+	// cachedPinnedVersion/pinnedVersionAt/pinnedVersionFetched (CO-308)
+	// cache get-config's pinnedVersion field the same way, on its own
+	// independent schedule — see pinnedVersion's own doc comment for
+	// why it's a separate cache rather than sharing redactConfig's.
+	cachedPinnedVersion  string
+	pinnedVersionAt      time.Time
+	pinnedVersionFetched bool
 }
 
 // githubLoginCacheTTL mirrors internal/upload's claude-version cache
@@ -186,6 +194,46 @@ func (l *lazyAPI) fallbackRedactConfig() redact.Config {
 	return redact.DefaultConfig()
 }
 
+// pinnedVersion fetches get-config's pinnedVersion field (CO-308), its
+// own separate cache from redactConfig's — a second GetConfig call
+// once per redactConfigCacheTTL rather than sharing one fetch, since
+// the two features (redaction overrides, update pinning) are
+// otherwise unrelated and this keeps each independently testable.
+// Unlike redactConfig, this returns an error on failure rather than a
+// safe fallback: internal/update's own caller treats "couldn't find
+// out the pin" as "skip this update cycle, try again next time," not
+// as "assume no pin and update anyway" — a transient lookup failure
+// must never be read as permission to update past a real pin.
+func (l *lazyAPI) pinnedVersion(ctx context.Context) (string, error) {
+	l.mu.Lock()
+	if l.pinnedVersionFetched && time.Since(l.pinnedVersionAt) < redactConfigCacheTTL {
+		v := l.cachedPinnedVersion
+		l.mu.Unlock()
+		return v, nil
+	}
+	l.mu.Unlock()
+
+	client, provider, err := l.resolve()
+	if err != nil {
+		return "", err
+	}
+	token, err := provider.AccessToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	cfg, err := client.GetConfig(ctx, token)
+	if err != nil {
+		return "", err
+	}
+
+	l.mu.Lock()
+	l.cachedPinnedVersion = cfg.PinnedVersion
+	l.pinnedVersionAt = time.Now()
+	l.pinnedVersionFetched = true
+	l.mu.Unlock()
+	return cfg.PinnedVersion, nil
+}
+
 func (l *lazyAPI) resolve() (*api.Client, *auth.Provider, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -281,6 +329,7 @@ func (p *agentProgram) Start(kservice.Service) error {
 	}
 
 	go func() { p.done <- a.Run(ctx) }()
+	go runUpdateLoop(ctx, lazy) // CO-308: daily self-update check, fire-and-forget — see its own doc comment
 	return nil
 }
 

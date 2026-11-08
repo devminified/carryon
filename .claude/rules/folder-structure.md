@@ -11,8 +11,9 @@ carryon/
 │   └── rules/                          detailed rules, imported by CLAUDE.md
 │
 ├── cmd/
-│   └── carryon/
-│       └── main.go                     the one binary: wires cobra commands to internal/
+│   ├── carryon/
+│   │   └── main.go                     the one binary: wires cobra commands to internal/
+│   └── carryon-sign-manifest/          release-side only (CO-308) — never shipped to a laptop; genkey + sign subcommands, see internal/update
 │
 ├── internal/
 │   ├── config/                         ~/.carryon/config.toml (api_url, anon_key) — loaded before anything else
@@ -33,6 +34,7 @@ carryon/
 │   ├── api/                            Edge Function client (register-session, get-manifest, …)
 │   ├── status/                         `carryon status`'s Report/Gather/Render (CO-113) — reads agent/filter's own status files
 │   ├── logfile/                        daily-rotating JSON log writer (CO-113), 7 kept — what `carryon logs` tails
+│   ├── update/                         CO-308's signed-manifest fetch/verify/stage/self-check/swap/restart — the daily auto-update mechanism
 │   └── service/                        service install per OS (launchd / systemd / Windows Service)
 │
 ├── supabase/
@@ -90,6 +92,13 @@ carryon/
 │       └── middleware.ts               auth refresh, route protection
 │
 ├── docs/                                long-form specs, requirements, decisions — e.g. docs/co-302-role-matrix.md
+│
+├── packaging/                           CO-308 — non-Go packaging inputs .goreleaser.yaml's own pipes read or that release.yml/a human runs directly
+│   ├── deb/postinstall.sh               runs `carryon install` as the real (non-root) invoking user after `apt install`/`dpkg -i`
+│   ├── winget/                          *.yaml.tmpl + generate.sh — winget manifest generation; submitting them is a deferred external step, see docs/co-308-fleet-rollout.md
+│   └── managed-settings/                managed-settings.json — Claude Code enterprise-managed hooks for MDM fleets; deploying it to the real OS path is the user's own MDM tooling, out of this repo's scope
+│
+├── install.sh                           CO-308's `curl | sh` installer — downloads, verifies against checksums.txt, extracts, runs `carryon install`
 │
 └── test/
     └── fixtures/                       sample sessions and repos, including the fake transcript writer used by CI e2e

@@ -34,6 +34,11 @@ pnpm test:e2e                   # playwright
 
 # Release (the carryon binary only — functions/migrations deploy on merge, see below)
 git tag v0.1.0 && git push --tags   # triggers GoReleaser cross-compile + release
+
+# CO-308: one-time, local, to provision the real production update-signing key
+go run ./cmd/carryon-sign-manifest genkey
+# release.yml runs the sign step itself on every tag push; only needed by hand when testing packaging locally:
+go run ./cmd/carryon-sign-manifest sign -version <v> -private-key-hex <hex> -base-url <url> -asset <os>/<arch>=<path> -out manifest.json
 ```
 
 ## Edge Functions and migrations deploy on merge, not on tag
@@ -41,6 +46,10 @@ git tag v0.1.0 && git push --tags   # triggers GoReleaser cross-compile + releas
 Both `supabase/functions/**` and `supabase/migrations/**` auto-deploy to `carryon-staging` on every merge to `main` that touches them (`.github/workflows/deploy-functions.yml`, `deploy-db.yml`) — never by hand-running `supabase functions deploy`/`supabase db push` from a dev machine. Each pipeline's CI gate (`ci.yml`'s `supabase` job: `deno lint`/`deno fmt --check`/`deno test`, `supabase db lint`/`db reset`, and the pgTAP RLS suite) runs as a required check before the merge that triggers deploy, so cloud deploy is always preceded by a passing local-equivalent run.
 
 The binary reads its backend from `~/.carryon/config.toml` (`api_url`, `anon_key`) — the same build points at local, staging (`carryon-staging`), production (`carryon-prod`), or a self-hosted instance. Never hardcode an environment's URL in Go source.
+
+## Release signing (CO-308)
+
+`release.yml` builds once (`goreleaser release --clean --skip=publish`), signs a release manifest with `cmd/carryon-sign-manifest` if `UPDATE_SIGNING_PRIVATE_KEY_HEX` is set, then creates the real GitHub release and uploads every asset via `gh release create` — never a second `goreleaser` invocation, since rebuilding would embed a different `-X main.date=...` and invalidate whatever was just signed. `UPDATE_PUBLIC_KEY_HEX` (baked into every release build via `-ldflags`) and `UPDATE_SIGNING_PRIVATE_KEY_HEX` (the signing step only) are both unset today — see `docs/co-308-fleet-rollout.md` for the one-time `carryon-sign-manifest genkey` step that provisions them for real, and why every laptop's daily update check stays a safe no-op until then.
 
 ## Local Supabase container — check before starting, never duplicate
 
