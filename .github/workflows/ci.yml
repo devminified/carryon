@@ -54,6 +54,8 @@ jobs:
         run: supabase db lint
       - name: migrations are idempotent on re-run (CO-102)
         run: supabase db reset
+      - name: pgTAP (RLS policies, CO-302)
+        run: supabase test db supabase/tests/database --local
       - name: deno lint
         run: deno lint supabase/functions
       - name: deno fmt check

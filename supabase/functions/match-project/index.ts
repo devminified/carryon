@@ -2,9 +2,13 @@
 // registered and the caller is a member — 404 if unregistered, 403 if
 // registered but the caller isn't on it. CO-108's capture agent calls this
 // (with a 1-hour cache) to decide whether a repo's sessions get uploaded
-// at all. Service role for the lookups (CO-102/CO-104: until CO-302's RLS
-// policies land), but membership is still enforced in code here — a
-// non-member must get exactly 403, never a project ID they can't access.
+// at all. Stays on the service role even after CO-302's RLS landed: the
+// first lookup (by git_remote, across every project) is inherently
+// cross-project — the whole point is telling "unregistered" apart from
+// "registered, but you're not on it," which RLS can't do from the
+// caller's own side (a non-member's query would just see zero rows for
+// both cases). Membership is still enforced in code here — a non-member
+// must get exactly 403, never a project ID they can't access.
 
 import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";

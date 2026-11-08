@@ -10,15 +10,21 @@
 // session, or calling it for a session the idle sweep already ended, is
 // a safe no-op — the UPDATE just rewrites the same values.
 //
-// Service role for the write (CO-102: until CO-302's RLS policies land),
-// but identity and membership are still enforced here from the caller's
-// own JWT.
+// CO-302's "owner_can_update_their_sessions" policy is the real
+// enforcement now: only the session's own owner may end it (not just
+// any project member, which the old stopgap check allowed) — ending a
+// session is the capturing agent's own act, not a teammate's. The
+// update runs as the caller; RLS silently matches zero rows for anyone
+// but the owner, which this function maps to the same 403 a non-member
+// used to get. The existence check stays on the service role so a
+// missing session is still reported as 404 rather than folded into the
+// same 403 a non-owner gets.
 
 import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";
-import { memberRole } from "../_shared/membership.ts";
 import {
   adminClient as realAdminClient,
+  callerClient as realCallerClient,
   requireUser as realRequireUser,
 } from "../_shared/supabase.ts";
 
@@ -30,11 +36,13 @@ const Input = z.object({
 // without a live instance — see index.test.ts.
 export interface Deps {
   adminClient: typeof realAdminClient;
+  callerClient: typeof realCallerClient;
   requireUser: typeof realRequireUser;
 }
 
 const defaultDeps: Deps = {
   adminClient: realAdminClient,
+  callerClient: realCallerClient,
   requireUser: realRequireUser,
 };
 
@@ -46,7 +54,8 @@ export async function handle(
     return errorResponse(405, "method_not_allowed");
   }
 
-  const user = await deps.requireUser(req.headers.get("Authorization"));
+  const authHeader = req.headers.get("Authorization");
+  const user = await deps.requireUser(authHeader);
   if (!user) {
     return errorResponse(401, "unauthorized");
   }
@@ -66,7 +75,7 @@ export async function handle(
 
   const { data: session, error: sessionErr } = await admin
     .from("sessions")
-    .select("project_id")
+    .select("id")
     .eq("id", input.sessionId)
     .maybeSingle();
   if (sessionErr) {
@@ -77,24 +86,20 @@ export async function handle(
     return errorResponse(404, "not_found", "no such session");
   }
 
-  let role: string | null;
-  try {
-    role = await memberRole(admin, session.project_id, user.id);
-  } catch (e) {
-    console.error("end-session: membership lookup failed", e);
-    return errorResponse(500, "internal_error");
-  }
-  if (!role) {
-    return errorResponse(403, "forbidden");
-  }
-
-  const { error: updateErr } = await admin
+  const caller = deps.callerClient(authHeader!);
+  const { data: updated, error: updateErr } = await caller
     .from("sessions")
     .update({ status: "ended", ended_reason: "explicit" })
-    .eq("id", input.sessionId);
+    .eq("id", input.sessionId)
+    .select("id");
   if (updateErr) {
     console.error("end-session: update failed", updateErr.code);
     return errorResponse(500, "internal_error");
+  }
+  if (!updated || updated.length === 0) {
+    // RLS matched zero rows — the session exists (checked above) but
+    // this caller isn't its owner.
+    return errorResponse(403, "forbidden");
   }
 
   return json({ ok: true }, 200);

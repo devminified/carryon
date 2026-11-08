@@ -12,9 +12,10 @@
 // confirm-chunk already applies to chunk object keys (see
 // .claude/rules/redaction.md).
 //
-// Service role for the write (CO-102: until CO-302's RLS policies land),
-// but identity and membership are still enforced here from the caller's
-// own JWT.
+// Service role for the write — signing a Storage upload URL isn't
+// expressible via RLS at all (CO-302), so this stays on the service
+// role regardless. Identity and membership are still enforced here
+// from the caller's own JWT.
 
 import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";

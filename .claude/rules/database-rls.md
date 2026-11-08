@@ -33,7 +33,7 @@ CO-111's idle-session sweep (a session with no activity for 12 hours gets `statu
 
 ## RLS policies
 
-Every table has RLS **enabled**. CO-102 ships every table with RLS on and **deny-all** (no policies yet — the anon/authenticated key gets zero rows everywhere). CO-302 is what adds the real per-role policies, built around one helper (exact signature per Doc §"Row-level security that stays fast"):
+Every table has RLS **enabled**. CO-102 shipped every table with RLS on and deny-all; CO-302 (`supabase/migrations/20261108010000_add_roles_and_rls.sql`) is what added the real per-role policies, built around one helper (exact signature per Doc §"Row-level security that stays fast"). `audit_log` is the one table still deliberately left deny-all past CO-302 — CO-304 ("Audit log," depends on CO-302) owns its real select/insert policy against that ticket's own added columns. The full table-by-role matrix (and how each cell is actually verified) lives in `docs/co-302-role-matrix.md`.
 
 `project_members.role` is a Postgres **enum**, not plain `text` — `viewer < resumer < admin` only holds under `>=` if declared in that order (`text` would sort `'admin' < 'resumer' < 'viewer'`, the opposite of what's intended):
 
@@ -71,7 +71,7 @@ create policy "resumer_can_read_chunks" on session_chunks
 - Never disable RLS to debug. Query as the role in question, or use the pgTAP suite.
 - **Never** inline `EXISTS (select 1 from project_members …)` in a policy — always go through `has_role()`, so the stability guarantee (one lookup per statement) holds everywhere.
 
-Every policy is tested with pgTAP for every role and every table (NFR-08, CO-302): a user without the role must get zero rows, never an error that leaks existence.
+Every policy is tested with pgTAP for every role and every table (NFR-08, CO-302): a user without the role must get zero rows, never an error that leaks existence. Tests live under `supabase/tests/database/*.sql`, one file per table, run via `supabase test db supabase/tests/database --local` (wired into `ci.yml`'s `supabase` job). The standard harness for "run this query as role X": `set local role authenticated; set local request.jwt.claim.sub = '<uuid>';` inside the test's own transaction — `SET ROLE` (not just the session's original login role) is what RLS actually keys off, and `postgres` is permitted to assume `authenticated` the same way PostgREST's `authenticator` role does in production.
 
 ## Generated types
 

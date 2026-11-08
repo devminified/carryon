@@ -10,13 +10,18 @@ function fakeDeps(opts: {
   user?: unknown;
   // deno-lint-ignore no-explicit-any
   session?: { data?: any; error?: any };
+  // CO-302: the update itself now runs as the caller, gated by RLS's
+  // owner-only update policy. isOwner stands in for what that policy
+  // would decide — true means the update "matches" (one row back),
+  // false means it silently matches zero rows, same as a real
+  // non-owner's request would.
+  isOwner?: boolean;
   // deno-lint-ignore no-explicit-any
-  member?: { data?: any; error?: any };
-  // deno-lint-ignore no-explicit-any
-  update?: { error?: any };
+  update?: { data?: any; error?: any };
   // deno-lint-ignore no-explicit-any
   onUpdate?: (row: any) => void;
 }): Deps {
+  const isOwner = opts.isOwner ?? true;
   return {
     requireUser: () => Promise.resolve(opts.user as never),
     adminClient: () =>
@@ -29,36 +34,43 @@ function fakeDeps(opts: {
                   maybeSingle: () =>
                     Promise.resolve(
                       opts.session ?? {
-                        data: { project_id: "p1" },
+                        data: { id: "11111111-1111-4111-8111-111111111111" },
                         error: null,
                       },
                     ),
                 }),
               }),
+            };
+          }
+          throw new Error(`unexpected table ${table}`);
+        },
+        // deno-lint-ignore no-explicit-any
+      }) as any,
+    callerClient: () =>
+      ({
+        from(table: string) {
+          if (table === "sessions") {
+            return {
               // deno-lint-ignore no-explicit-any
               update: (row: any) => {
                 opts.onUpdate?.(row);
                 return {
-                  eq: () => Promise.resolve(opts.update ?? { error: null }),
-                };
-              },
-            };
-          }
-          if (table === "project_members") {
-            return {
-              select: () => ({
-                eq: () => ({
                   eq: () => ({
-                    maybeSingle: () =>
+                    select: () =>
                       Promise.resolve(
-                        opts.member ?? {
-                          data: { role: "resumer" },
-                          error: null,
-                        },
+                        opts.update ??
+                          (isOwner
+                            ? {
+                              data: [{
+                                id: "11111111-1111-4111-8111-111111111111",
+                              }],
+                              error: null,
+                            }
+                            : { data: [], error: null }),
                       ),
                   }),
-                }),
-              }),
+                };
+              },
             };
           }
           throw new Error(`unexpected table ${table}`);
@@ -112,10 +124,10 @@ Deno.test("returns 404 when the session doesn't exist", async () => {
   assertEquals(res.status, 404);
 });
 
-Deno.test("rejects a caller who isn't a project member", async () => {
+Deno.test("rejects a caller who isn't the session's owner (RLS matches zero rows)", async () => {
   const res = await handle(
     req(validBody()),
-    fakeDeps({ user: fakeUser(), member: { data: null, error: null } }),
+    fakeDeps({ user: fakeUser(), isOwner: false }),
   );
   assertEquals(res.status, 403);
 });
@@ -160,7 +172,7 @@ Deno.test("surfaces a session lookup failure as 500", async () => {
 Deno.test("surfaces an update failure as 500", async () => {
   const deps = fakeDeps({
     user: fakeUser(),
-    update: { error: { code: "XXXXX", message: "boom" } },
+    update: { data: null, error: { code: "XXXXX", message: "boom" } },
   });
 
   const res = await handle(req(validBody()), deps);

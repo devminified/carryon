@@ -45,13 +45,16 @@ function fakeDeps(opts: {
                     ),
                 }),
               }),
-              // deno-lint-ignore no-explicit-any
-              upsert: (row: any) => {
-                opts.onUpsert?.(row);
-                return Promise.resolve(opts.upsert ?? { error: null });
-              },
             };
           }
+          throw new Error(`unexpected table ${table}`);
+        },
+        // deno-lint-ignore no-explicit-any
+      }) as any,
+    // CO-302: the role check and the upsert itself run as the caller.
+    callerClient: () =>
+      ({
+        from(table: string) {
           if (table === "project_members") {
             return {
               select: () => ({
@@ -65,6 +68,15 @@ function fakeDeps(opts: {
                   }),
                 }),
               }),
+            };
+          }
+          if (table === "sessions") {
+            return {
+              // deno-lint-ignore no-explicit-any
+              upsert: (row: any) => {
+                opts.onUpsert?.(row);
+                return Promise.resolve(opts.upsert ?? { error: null });
+              },
             };
           }
           throw new Error(`unexpected table ${table}`);

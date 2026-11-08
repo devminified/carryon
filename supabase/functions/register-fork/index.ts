@@ -16,7 +16,14 @@
 //
 // Requires resumer role or higher on the parent session's project --
 // the same bar get-manifest (CO-203) sets for pulling a session's
-// content at all; forking is what pulling leads to.
+// content at all; forking is what pulling leads to. CO-302's own
+// project_members select policy backs that check now (same pattern as
+// get-manifest), and the upsert itself runs as the caller too: a
+// brand-new fork is always "insert for myself" (owner_can_create_
+// their_sessions), and a retried upsert of the same new_session_id is
+// always "update my own session" (owner_can_update_their_sessions) --
+// both already match CO-302's real policies, so there's no admin-only
+// capability left here that needs the service role.
 //
 // Idempotent on new_session_id (I3): a retried call with the same
 // new_session_id re-applies the same upsert rather than erroring or
@@ -24,9 +31,10 @@
 
 import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";
-import { hasMinRole, memberRole } from "../_shared/membership.ts";
+import { hasMinRole } from "../_shared/membership.ts";
 import {
   adminClient as realAdminClient,
+  callerClient as realCallerClient,
   requireUser as realRequireUser,
 } from "../_shared/supabase.ts";
 
@@ -37,11 +45,13 @@ const Input = z.object({
 
 export interface Deps {
   adminClient: typeof realAdminClient;
+  callerClient: typeof realCallerClient;
   requireUser: typeof realRequireUser;
 }
 
 const defaultDeps: Deps = {
   adminClient: realAdminClient,
+  callerClient: realCallerClient,
   requireUser: realRequireUser,
 };
 
@@ -53,7 +63,8 @@ export async function handle(
     return errorResponse(405, "method_not_allowed");
   }
 
-  const user = await deps.requireUser(req.headers.get("Authorization"));
+  const authHeader = req.headers.get("Authorization");
+  const user = await deps.requireUser(authHeader);
   if (!user) {
     return errorResponse(401, "unauthorized");
   }
@@ -69,8 +80,12 @@ export async function handle(
     );
   }
 
+  // The existence check stays on the service role -- the sessions
+  // select policy is broader than "resumer+" (any viewer can see a
+  // session), so reading it as the caller wouldn't reliably tell a
+  // true 404 apart from "exists, but I can only see it as a viewer,
+  // not fork it" -- that distinction is exactly the next check below.
   const admin = deps.adminClient();
-
   const { data: parent, error: parentErr } = await admin
     .from("sessions")
     .select(
@@ -86,18 +101,22 @@ export async function handle(
     return errorResponse(404, "not_found", "no such parent session");
   }
 
-  let role: string | null;
-  try {
-    role = await memberRole(admin, parent.project_id, user.id);
-  } catch (e) {
-    console.error("register-fork: membership lookup failed", e);
+  const caller = deps.callerClient(authHeader!);
+  const { data: memberRow, error: memberErr } = await caller
+    .from("project_members")
+    .select("role")
+    .eq("project_id", parent.project_id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (memberErr) {
+    console.error("register-fork: membership lookup failed", memberErr.code);
     return errorResponse(500, "internal_error");
   }
-  if (!hasMinRole(role, "resumer")) {
+  if (!hasMinRole(memberRow?.role ?? null, "resumer")) {
     return errorResponse(403, "forbidden");
   }
 
-  const { error: upsertErr } = await admin.from("sessions").upsert(
+  const { error: upsertErr } = await caller.from("sessions").upsert(
     {
       id: input.newSessionId,
       project_id: parent.project_id,

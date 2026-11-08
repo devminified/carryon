@@ -13,7 +13,7 @@ Four runtimes, one CI run per PR. This mirrors Doc's "CI on every pull request" 
 ## Database
 
 - `supabase db lint`, then apply all migrations to a fresh database.
-- **pgTAP** tests for every RLS policy, every role, every table (NFR-08) — a forbidden role must get zero rows, not an error that leaks existence.
+- **pgTAP** tests for every RLS policy, every role, every table (NFR-08) — a forbidden role must get zero rows, not an error that leaks existence. Files live under `supabase/tests/database/*.sql`, one per table; run with `supabase test db supabase/tests/database --local` (wired into CI's `supabase` job, CO-302). See `database-rls.md` for the role-simulation harness pattern.
 
 ## Edge Functions
 

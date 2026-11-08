@@ -1,9 +1,13 @@
 // CO-104: `carryon admin project add` calls this to register a project.
 // The caller becomes the project's first member with role "admin" — there's
 // no other way to bootstrap membership for a project that doesn't exist
-// yet. Uses the service role (CO-102/CO-104: Edge Functions do until
-// CO-302 adds real RLS policies) but identity still comes from the
-// caller's own JWT, never a client-supplied field.
+// yet. Stays on the service role even after CO-302's RLS landed: there's
+// no project_members row yet for the new project, so no policy could
+// let this caller's own insert through on their own — projects/
+// project_members have no RLS rule for "the person about to become
+// this project's first admin," the same kind of bootstrapping
+// architecture.md carves the service role out for. Identity still
+// comes from the caller's own JWT, never a client-supplied field.
 
 import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";
