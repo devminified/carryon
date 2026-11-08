@@ -54,8 +54,9 @@ carryon/
 │       ├── sign-snapshot-bundle/       signs the upload URL for register-snapshot's git-bundle fallback (CO-202)
 │       ├── summarize-session/
 │       ├── rescan/
-│       ├── sync-github-teams/
-│       └── _shared/                    schema validation, has_role helper, Resend/Slack clients
+│       ├── sync-github-teams/           GitHub App auth + team membership → project_members reconciliation (CO-303)
+│       ├── .env.example                 Edge Function secrets beyond Supabase's own auto-provided ones (CO-303: GITHUB_APP_*, CRON_SECRET) — supabase/functions/.env (gitignored) for local dev
+│       └── _shared/                    schema validation, has_role helper, Resend/Slack clients, github.ts (GitHub App JWT + installation token + team members, CO-303)
 │
 ├── web/                                Next.js app
 │   ├── next.config.ts
