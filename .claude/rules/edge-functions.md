@@ -10,6 +10,8 @@ The named RPCs: `register-session`, `register-chunk`, `confirm-chunk`, `end-sess
 
 `get-config` (CO-301) is the same kind of named exception: it lets `internal/redact`'s laptop-side rule set be narrowed (disable a rule by ID) or its path denylist extended, from the server, without a new binary release. No request body, and no project/role check — every authenticated user gets the same global config, since there's no per-project redaction config in the current build plan. It reads the single `redaction_config` row with the service-role client — this one stays on the service role even past CO-302, since `redaction_config` has no per-project scoping for RLS to key off at all (every authenticated caller gets the same global row) — and returns `{disabledRuleIds, denylistAdditions}` — see `.claude/rules/redaction.md` for why there's deliberately no way to supply a raw pattern through it.
 
+`confirm-pull` (CO-304) is the last of these — the laptop calls it once `carryon pull` has fully succeeded, writing `audit_log`'s `"pull_complete"` row. It exists because the server has no other way to know a pull finished: chunk bytes flow straight from Storage to the laptop (I9), never through the API, so `get-manifest`'s own `"pull_manifest"` row only ever covers the *start* of a pull. Same access rule as `get-manifest` (resumer role or higher): the session-existence check stays on the service role (so a missing session reports a clean 404, not folded into the 403 a real-but-forbidden session gets), and the role check itself runs as the caller via CO-302's own `project_members` select policy.
+
 ## Contract
 
 ```ts

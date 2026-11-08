@@ -208,6 +208,16 @@ func pullWithClient(cmd *cobra.Command, client *api.Client, token string, cfg *c
 	}
 	printStep(cmd, "place", placeResult.MainPath)
 
+	// CO-304: the pull itself has now fully succeeded (manifest fetched,
+	// worktree restored, chunks rebuilt, paths/session ID rewritten, fork
+	// registered, files placed) — audit that regardless of whether the
+	// user goes on to actually launch Claude Code below. Best-effort: a
+	// logging failure here is never a reason to fail a pull that already
+	// succeeded.
+	if err := client.ConfirmPull(ctx, token, newID); err != nil {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to record pull_complete: %v\n", err)
+	}
+
 	uncommitted, err := project.UncommittedFileCount(ctx, restoreResult.Path)
 	if err != nil {
 		uncommitted = 0 // best-effort for the header only — never fails the pull over it

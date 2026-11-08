@@ -55,6 +55,7 @@ carryon/
 │       ├── summarize-session/
 │       ├── rescan/
 │       ├── sync-github-teams/           GitHub App auth + team membership → project_members reconciliation (CO-303)
+│       ├── confirm-pull/                writes audit_log's "pull_complete" row once a real pull fully succeeds (CO-304) — not in Doc's original RPC list, see edge-functions.md
 │       ├── .env.example                 Edge Function secrets beyond Supabase's own auto-provided ones (CO-303: GITHUB_APP_*, CRON_SECRET) — supabase/functions/.env (gitignored) for local dev
 │       └── _shared/                    schema validation, has_role helper, Resend/Slack clients, github.ts (GitHub App JWT + installation token + team members, CO-303)
 │

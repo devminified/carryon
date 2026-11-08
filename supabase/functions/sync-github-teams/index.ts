@@ -219,7 +219,16 @@ export async function handle(
         continue;
       }
       changes++;
-      await admin.from("audit_log").insert({ action: "role_change" });
+      const { error: auditErr } = await admin.from("audit_log").insert({
+        action: "role_change",
+        project_id: project.id,
+      });
+      if (auditErr) {
+        console.error(
+          `sync-github-teams: audit log insert failed for project ${project.id} user ${userID}`,
+          auditErr.code,
+        );
+      }
     }
 
     for (const [userID, existing] of existingByUserID) {
@@ -239,7 +248,16 @@ export async function handle(
         continue;
       }
       changes++;
-      await admin.from("audit_log").insert({ action: "role_change" });
+      const { error: auditErr } = await admin.from("audit_log").insert({
+        action: "role_change",
+        project_id: project.id,
+      });
+      if (auditErr) {
+        console.error(
+          `sync-github-teams: audit log insert failed for project ${project.id} user ${userID}`,
+          auditErr.code,
+        );
+      }
     }
   }
 
