@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -84,6 +85,74 @@ func TestConfirmPullForbidden(t *testing.T) {
 	err := c.ConfirmPull(context.Background(), "access-token", "s1")
 	if !IsForbidden(err) {
 		t.Errorf("IsForbidden(err) = false for %v, want true", err)
+	}
+}
+
+func TestDeleteSessionSuccess(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "anon-key")
+	err := c.DeleteSession(context.Background(), "access-token", "s1", "developer left the team")
+	if err != nil {
+		t.Fatalf("DeleteSession() error = %v", err)
+	}
+
+	if gotPath != "/functions/v1/delete-session" {
+		t.Errorf("path = %q, want /functions/v1/delete-session", gotPath)
+	}
+	if gotBody["sessionId"] != "s1" || gotBody["reason"] != "developer left the team" {
+		t.Errorf("request body = %+v", gotBody)
+	}
+}
+
+func TestDeleteSessionForbidden(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(errorResponse{Error: "forbidden"})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "anon-key")
+	err := c.DeleteSession(context.Background(), "access-token", "s1", "reason")
+	if !IsForbidden(err) {
+		t.Errorf("IsForbidden(err) = false for %v, want true", err)
+	}
+}
+
+func TestDeleteSessionNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(errorResponse{Error: "not_found"})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "anon-key")
+	err := c.DeleteSession(context.Background(), "access-token", "missing", "reason")
+	if !IsNotFound(err) {
+		t.Errorf("IsNotFound(err) = false for %v, want true", err)
+	}
+}
+
+func TestDeleteSessionMissingReasonIsBadRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(errorResponse{Error: "validation_failed", Message: "reason: too small"})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "anon-key")
+	err := c.DeleteSession(context.Background(), "access-token", "s1", "")
+	var apiErr *Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
+		t.Errorf("DeleteSession() error = %v, want a 400 *Error", err)
 	}
 }
 

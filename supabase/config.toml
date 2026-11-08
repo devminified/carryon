@@ -391,6 +391,12 @@ verify_jwt = false
 # x-cron-secret header (RESCAN_CRON_SECRET) instead, checked in code.
 verify_jwt = false
 
+[functions.purge-expired-sessions]
+# CO-307: same shape as rescan/sync-github-teams above — a pg_cron job
+# calls this via net.http_post, with no user JWT. Authenticated via a
+# shared x-cron-secret header (PURGE_CRON_SECRET) instead.
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

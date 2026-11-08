@@ -4,7 +4,9 @@ Applies to everything under `cmd/carryon/` and `internal/`.
 
 ## CLI surface (`spf13/cobra`)
 
-Commands: `install`, `uninstall`, `login`, `hook`, `agent`, `status`, `logs`, `ls`, `pull`, `export`, `rename`. Each command's `RunE` stays thin — parse flags, call into the matching `internal/` package, translate errors to exit codes. Business logic never lives in `cmd/carryon/main.go` or in a cobra `RunE` closure.
+Commands: `install`, `uninstall`, `login`, `hook`, `agent`, `status`, `logs`, `ls`, `pull`, `export`, `rename`, `admin`. Each command's `RunE` stays thin — parse flags, call into the matching `internal/` package, translate errors to exit codes. Business logic never lives in `cmd/carryon/main.go` or in a cobra `RunE` closure.
+
+`admin` is a command group, not a single RPC-backed command — `admin project add <name> <remote>` (register-project) and `admin delete <session-id> --reason` (CO-307's delete-session) so far. Each subcommand still follows the same thin-`RunE` rule; the group just gives related admin actions one discoverable namespace instead of a flat list of top-level verbs.
 
 ## The hook path is latency-critical (I1, NFR-01)
 

@@ -1,8 +1,13 @@
 -- CO-302: sessions RLS — owner always reads their own session, any
 -- project member (viewer+) reads every session in that project, only
 -- the owner writes it, only an admin deletes it.
+-- CO-307: deleting a parent session keeps its forks, reparented to
+-- null (the plain ON DELETE SET NULL FK on parent_session_id, not an
+-- RLS policy — still worth locking in here since it's this ticket's
+-- own named testing point, right next to the admin-delete test it
+-- depends on).
 begin;
-select plan(13);
+select plan(15);
 
 insert into auth.users (id, email) values
   ('a2222222-2222-2222-2222-222222222201', 'owner@test.local'),
@@ -105,13 +110,30 @@ select results_eq(
   $$values (1::bigint)$$, 'the viewer''s delete affected zero rows — the session survived'
 );
 
--- An admin can delete it.
+-- A fork of this session, owned by the viewer (a pulled resume) —
+-- created as the database owner so this insert isn't itself under
+-- test, same as every other fixture row above.
 reset role;
+insert into sessions (id, project_id, user_id, original_cwd, parent_session_id) values
+  ('a2222222-2222-2222-2222-22222222220c', 'a2222222-2222-2222-2222-22222222220a', 'a2222222-2222-2222-2222-222222222202', '/home/y', 'a2222222-2222-2222-2222-22222222220b');
+
+-- An admin can delete the parent.
 set local role authenticated;
 set local request.jwt.claim.sub = 'a2222222-2222-2222-2222-222222222203';
 select lives_ok(
   $$delete from sessions where id = 'a2222222-2222-2222-2222-22222222220b'$$,
   'an admin can delete the session'
+);
+
+-- CO-307: the fork survives, reparented to null.
+reset role;
+select results_eq(
+  $$select count(*) from sessions where id = 'a2222222-2222-2222-2222-22222222220c'$$,
+  $$values (1::bigint)$$, 'the fork survives its parent being deleted'
+);
+select results_eq(
+  $$select parent_session_id from sessions where id = 'a2222222-2222-2222-2222-22222222220c'$$,
+  $$values (null::uuid)$$, 'the fork''s parent_session_id is set to null, not left dangling'
 );
 
 select * from finish();
