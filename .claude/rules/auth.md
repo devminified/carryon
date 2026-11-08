@@ -21,9 +21,20 @@ Supabase Auth's GitHub provider needs a GitHub OAuth App — create one under th
 
 **Not yet built:** restricting signups to the `devminified` GitHub org (anyone with a GitHub account can currently create a Carryon account — fine for now since RLS means a non-member sees nothing, but tracked as a follow-up: a Supabase Auth "before user created" hook checking org membership).
 
+## GitHub App setup (external, one-time, CO-303)
+
+A **GitHub App**, separate from the OAuth App above — the OAuth App is what a developer signs into Carryon with; this App is what `sync-github-teams` uses to read `team_viewer`/`team_resumer`/`team_admin` membership via the GitHub API, under its own installation token rather than any one user's session. Create it under the `devminified` org (GitHub → Settings → Developer settings → GitHub Apps → New GitHub App), install it on the org, and:
+
+- **Permissions:** `Members: Read-only` (organization permission) is enough — it only ever lists team members, never writes anything back to GitHub.
+- Generate a private key (PEM) for the App; note the App ID and the installation ID (`Settings → Installed GitHub Apps`, the numeric ID in the installation's URL).
+- Put all three in `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` / `GITHUB_APP_INSTALLATION_ID` (see `supabase/functions/.env.example`) — `supabase secrets set` for staging/production, `supabase/functions/.env` (gitignored) for local dev.
+- Each project's `team_viewer`/`team_resumer`/`team_admin` columns store the team's **stable numeric ID**, never its slug (`GET /orgs/{org}/teams/{slug}` once, to read off its `id`) — `_shared/github.ts` only ever queries `/teams/{id}/members`, so a later team rename changes nothing.
+
+`sync-github-teams` itself has no caller JWT to verify (it's called by a `pg_cron` job, not a user) — it checks a shared `x-cron-secret` header instead. That secret lives in two places that don't talk to each other automatically: the function's own `CRON_SECRET` secret, and a Supabase Vault secret named `sync_github_teams_cron_secret` the cron job reads from. **A human has to make them match** — see the migration's own comment (`supabase/migrations/20261108020000_add_github_team_sync.sql`) for the one-time `vault.update_secret` call.
+
 ## Roles
 
-Per-project, **mirrored from GitHub team membership** (`sync-github-teams` Edge Function), not set ad hoc in the app:
+Per-project, **mirrored from GitHub team membership** (`sync-github-teams` Edge Function, every 15 minutes), not set ad hoc in the app:
 
 | Role | Sees session list | Reads transcripts | Pulls/resumes | Deletes |
 | --- | --- | --- | --- | --- |
@@ -32,6 +43,8 @@ Per-project, **mirrored from GitHub team membership** (`sync-github-teams` Edge 
 | `admin` | Yes | Yes | Yes | Yes, with a reason in `audit_log` |
 
 Leaving the GitHub team removes access on the next sync — don't add a separate "revoke access" UI action that only touches `project_members` without also considering the sync job will re-grant it.
+
+`project_members.source` (CO-303) distinguishes a GitHub-derived row (`'sync'`) from an admin's own direct action (`'manual'`) — `sync-github-teams` only ever writes or removes `'sync'` rows, so a manual override always survives the next sync. If a project has none of `team_viewer`/`team_resumer`/`team_admin` set, the sync job skips it entirely (membership stays 100% manual, same as before this ticket) — setting at least one team column is what opts a project into GitHub-driven membership at all.
 
 ## Reading the current user / role
 

@@ -13,8 +13,8 @@ A project **is** the tenant boundary here: there's no separate organization/`ten
 
 | Table | Primary key | Notes |
 | --- | --- | --- |
-| `projects` | `id` | one row per registered repo; `git_remote` unique |
-| `project_members` | `(project_id, user_id)` | `role` is `viewer` / `resumer` / `admin`, mirrored from GitHub teams (CO-303) |
+| `projects` | `id` | one row per registered repo; `git_remote` unique; `team_viewer`/`team_resumer`/`team_admin` (added by CO-303's migration) are GitHub's own stable numeric team IDs, nullable — a project with none set stays 100% manually managed |
+| `project_members` | `(project_id, user_id)` | `role` is `viewer` / `resumer` / `admin`, mirrored from GitHub teams (CO-303); `source` (`'manual'` \| `'sync'`, added by the same migration) marks whether a row was an admin's own direct action or the sync job's — the sync job only ever writes/removes `'sync'` rows, so a manual override always survives the next sync |
 | `sessions` | `id` | `id` is Claude Code's own `session_id`; `parent_session_id` set on a pulled fork; `ended_reason` (`'explicit'` \| `'idle'`, added by CO-111's migration) distinguishes a real `SessionEnd` from the idle sweep below |
 | `session_chunks` | `(session_id, stream_id, seq)` | append-only, grows forever within a session; `stream_id` is `'main'` for the session's own transcript or a subagent's `agent_id` for a child stream (CO-109/CO-110 — added by a later migration than CO-102's original `(session_id, seq)`, once a real subagent chunk would otherwise have collided with the main stream's `seq` numbering) |
 | `code_snapshots` | `(session_id, seq)` | `wip_ref` (hidden git ref) or `object_key` (bundle fallback, CO-202); `tree_sha` (added by a later migration than CO-102's original columns, CO-201) is the pushed commit's tree object, letting a retry compare against what's already registered without re-deriving it server-side |

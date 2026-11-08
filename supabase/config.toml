@@ -377,6 +377,14 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+[functions.sync-github-teams]
+# CO-303: triggered by a pg_cron job via net.http_post, not a browser or
+# the CLI — there's no user JWT to verify. The function authenticates
+# the call itself via a shared x-cron-secret header (CRON_SECRET),
+# checked in code — see edge-functions.md's "scheduled Edge Functions"
+# section and auth.md's GitHub App setup.
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.
