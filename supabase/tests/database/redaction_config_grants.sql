@@ -1,0 +1,25 @@
+-- CO-306: redaction_config's own migration (CO-301) never granted
+-- service_role access to it — the same "BYPASSRLS exempts RLS checks
+-- but GRANT is a separate, still-required privilege" gap
+-- 20261106002756_grant_service_role.sql's own comment describes, just
+-- missed for this one table. Found for real: get-config (which has
+-- been live since CO-301) 500ed with 42501 insufficient_privilege the
+-- first time it was actually exercised against a real local instance
+-- as part of this ticket's own testing. Locking the fix in here so it
+-- can't silently regress.
+begin;
+select plan(2);
+
+select ok(
+  has_table_privilege('service_role', 'redaction_config', 'SELECT'),
+  'service_role can select from redaction_config'
+);
+set local role service_role;
+select lives_ok(
+  $$select disabled_rule_ids, updated_at from redaction_config where id = 'default'$$,
+  'a service-role read of redaction_config succeeds'
+);
+reset role;
+
+select * from finish();
+rollback;

@@ -385,6 +385,12 @@ allow_dynamic_registration = false
 # section and auth.md's GitHub App setup.
 verify_jwt = false
 
+[functions.rescan]
+# CO-306: same shape as sync-github-teams above — a pg_cron job calls
+# this via net.http_post, with no user JWT. Authenticated via a shared
+# x-cron-secret header (RESCAN_CRON_SECRET) instead, checked in code.
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.
