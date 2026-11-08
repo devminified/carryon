@@ -14,6 +14,17 @@ func (c *Client) EndSession(ctx context.Context, accessToken, sessionID string) 
 	return c.post(ctx, "end-session", accessToken, body, nil)
 }
 
+// ConfirmPull calls the confirm-pull Edge Function (CO-304) once
+// `carryon pull` has fully succeeded for sessionID — writes the
+// audit_log's "pull_complete" row. There's no other way for the server
+// to know a pull finished: chunk bytes flow straight from Storage to
+// the laptop (I9), never through the API, so get-manifest's own
+// "pull_manifest" row only ever covers the start of a pull.
+func (c *Client) ConfirmPull(ctx context.Context, accessToken, sessionID string) error {
+	body := map[string]string{"sessionId": sessionID}
+	return c.post(ctx, "confirm-pull", accessToken, body, nil)
+}
+
 // ListSessionsInput is list-sessions' (CO-204) optional filters — every
 // field's zero value means "don't filter on this."
 type ListSessionsInput struct {

@@ -435,6 +435,7 @@ Deno.test("writes a pull_manifest audit row naming the actor and session", async
   assertEquals(audited.actor, "caller-9");
   assertEquals(audited.action, "pull_manifest");
   assertEquals(audited.session_id, SESSION_ID);
+  assertEquals(audited.project_id, "p1");
 });
 
 Deno.test("an audit log write failure doesn't fail the manifest response", async () => {

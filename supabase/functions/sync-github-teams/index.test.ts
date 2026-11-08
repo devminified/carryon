@@ -194,6 +194,7 @@ Deno.test(
       },
     ]);
     assertEquals(state.auditLog.length, 1);
+    assertEquals(state.auditLog[0].project_id, "p1");
   }),
 );
 

@@ -24,6 +24,10 @@ function fakeDeps(opts: {
   onSessionUpdate?: (row: any) => void;
   // deno-lint-ignore no-explicit-any
   onChunkUpsert?: (row: any) => void;
+  // deno-lint-ignore no-explicit-any
+  auditInsert?: { error?: any };
+  // deno-lint-ignore no-explicit-any
+  onAuditInsert?: (row: any) => void;
 }): Deps {
   return {
     requireUser: () => Promise.resolve(opts.user as never),
@@ -86,6 +90,15 @@ function fakeDeps(opts: {
                     },
                   ),
               }),
+            };
+          }
+          if (table === "audit_log") {
+            return {
+              // deno-lint-ignore no-explicit-any
+              insert: (row: any) => {
+                opts.onAuditInsert?.(row);
+                return Promise.resolve(opts.auditInsert ?? { error: null });
+              },
             };
           }
           throw new Error(`unexpected table ${table}`);
@@ -288,6 +301,46 @@ Deno.test("surfaces a session activity update failure as 500", async () => {
 
   const res = await handle(req(validBody()), deps);
   assertEquals(res.status, 500);
+});
+
+Deno.test("writes an upload audit row naming the actor, session, and project (CO-304)", async () => {
+  // deno-lint-ignore no-explicit-any
+  let audited: any;
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    onAuditInsert: (row) => {
+      audited = row;
+    },
+  });
+
+  const res = await handle(req(validBody()), deps);
+  assertEquals(res.status, 200);
+  assertEquals(audited.actor, "u1");
+  assertEquals(audited.action, "upload");
+  assertEquals(audited.session_id, "11111111-1111-4111-8111-111111111111");
+  assertEquals(audited.project_id, "p1");
+});
+
+Deno.test("a duplicate-upload-today audit insert (23505) is swallowed, not an error", async () => {
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    auditInsert: { error: { code: "23505", message: "duplicate key" } },
+  });
+
+  const res = await handle(req(validBody()), deps);
+  assertEquals(res.status, 200);
+  const body = await res.json();
+  assertEquals(body.ok, true);
+});
+
+Deno.test("a non-duplicate audit insert failure is logged but doesn't fail the chunk confirmation", async () => {
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    auditInsert: { error: { code: "XXXXX", message: "boom" } },
+  });
+
+  const res = await handle(req(validBody()), deps);
+  assertEquals(res.status, 200);
 });
 
 Deno.test("retrying the same (session_id, seq) replaces the row instead of erroring (idempotent, NFR-05)", async () => {

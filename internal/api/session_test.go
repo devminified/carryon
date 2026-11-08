@@ -48,6 +48,45 @@ func TestEndSessionForbidden(t *testing.T) {
 	}
 }
 
+func TestConfirmPullSuccess(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "anon-key")
+	err := c.ConfirmPull(context.Background(), "access-token", "s1")
+	if err != nil {
+		t.Fatalf("ConfirmPull() error = %v", err)
+	}
+
+	if gotPath != "/functions/v1/confirm-pull" {
+		t.Errorf("path = %q, want /functions/v1/confirm-pull", gotPath)
+	}
+	if gotBody["sessionId"] != "s1" {
+		t.Errorf("request body = %+v", gotBody)
+	}
+}
+
+func TestConfirmPullForbidden(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(errorResponse{Error: "forbidden"})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "anon-key")
+	err := c.ConfirmPull(context.Background(), "access-token", "s1")
+	if !IsForbidden(err) {
+		t.Errorf("IsForbidden(err) = false for %v, want true", err)
+	}
+}
+
 func TestListSessionsSendsOnlyNonZeroFilters(t *testing.T) {
 	var gotPath string
 	var gotBody map[string]any

@@ -187,6 +187,25 @@ export async function handle(
     return errorResponse(500, "internal_error");
   }
 
+  // CO-304: "upload" is logged once per session per day, to limit
+  // volume. Attempted unconditionally on every confirmed chunk, not
+  // just the first — audit_log_one_upload_per_session_per_day (the
+  // migration's own unique index) is what actually enforces "once,"
+  // so a 23505 here just means today's row already exists, not an
+  // error. Any other failure is logged but never fails the chunk
+  // confirmation itself — same "a logging failure isn't a reason to
+  // fail the real operation" standard get-manifest's own audit insert
+  // already follows.
+  const { error: auditErr } = await admin.from("audit_log").insert({
+    actor: user.id,
+    action: "upload",
+    session_id: input.sessionId,
+    project_id: session.project_id,
+  });
+  if (auditErr && auditErr.code !== "23505") {
+    console.error("confirm-chunk: audit log insert failed", auditErr.code);
+  }
+
   return json({ ok: true }, 200);
 }
 

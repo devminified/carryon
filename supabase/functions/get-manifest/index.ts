@@ -238,6 +238,9 @@ export async function handle(
     actor: user.id,
     action: "pull_manifest",
     session_id: input.sessionId,
+    project_id: session.project_id,
+    ip: req.headers.get("x-forwarded-for"),
+    user_agent: req.headers.get("user-agent"),
   });
   if (auditErr) {
     // The manifest itself is still correct and safe to return — losing

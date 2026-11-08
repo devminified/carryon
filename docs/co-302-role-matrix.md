@@ -7,6 +7,12 @@ written out as a table, plus how each row is verified. **Needs explicit
 CTO sign-off before this is considered fully done — this file states what
 was built; it isn't itself the sign-off.**
 
+> **Superseded in part by CO-304.** This snapshot predates CO-304 ("Audit
+> log"), which added `audit_log`'s real select policies. The `audit_log`
+> row below (still showing CO-302's original "deliberately deferred"
+> state) is now historical — see `.claude/rules/database-rls.md`'s RLS
+> section for the real, current policy.
+
 Three roles per project, in ascending order: `viewer < resumer < admin`.
 "Owner" means `sessions.user_id = auth.uid()` — a developer can always
 read and manage their own sessions regardless of their project role
