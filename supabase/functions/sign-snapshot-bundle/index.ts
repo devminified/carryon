@@ -21,6 +21,7 @@ import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";
 import { bundleObjectKey } from "../_shared/snapshots.ts";
 import { memberRole } from "../_shared/membership.ts";
+import { resolveBucket } from "../_shared/storage.ts";
 import {
   adminClient as realAdminClient,
   requireUser as realRequireUser,
@@ -42,8 +43,6 @@ const defaultDeps: Deps = {
   adminClient: realAdminClient,
   requireUser: realRequireUser,
 };
-
-const BUCKET = "carryon-sessions";
 
 export async function handle(
   req: Request,
@@ -98,6 +97,21 @@ export async function handle(
     return errorResponse(403, "forbidden");
   }
 
+  // CO-305: resolve which bucket this project's bytes belong in.
+  const { data: project, error: projectErr } = await admin
+    .from("projects")
+    .select("bucket")
+    .eq("id", session.project_id)
+    .maybeSingle();
+  if (projectErr) {
+    console.error(
+      "sign-snapshot-bundle: project lookup failed",
+      projectErr.code,
+    );
+    return errorResponse(500, "internal_error");
+  }
+  const bucket = resolveBucket(project);
+
   const objectKey = bundleObjectKey(
     session.project_id,
     session.user_id,
@@ -110,7 +124,7 @@ export async function handle(
   // break retrying an upload whose register-snapshot call failed even
   // though the PUT itself succeeded.
   const { data: signed, error: signErr } = await admin.storage
-    .from(BUCKET)
+    .from(bucket)
     .createSignedUploadUrl(objectKey, { upsert: true });
   if (signErr || !signed) {
     console.error("sign-snapshot-bundle: signing upload url failed", signErr);
@@ -120,7 +134,7 @@ export async function handle(
   // Only the token is returned, never signedUrl — it bakes in this
   // function's own internal SUPABASE_URL (see redaction.md); the Go
   // client builds the actual upload URL from its own base URL instead.
-  return json({ uploadToken: signed.token, objectKey }, 200);
+  return json({ uploadToken: signed.token, objectKey, bucket }, 200);
 }
 
 if (import.meta.main) {

@@ -13,6 +13,8 @@ function fakeDeps(opts: {
   // deno-lint-ignore no-explicit-any
   member?: { data?: any; error?: any };
   // deno-lint-ignore no-explicit-any
+  project?: { data?: any; error?: any };
+  // deno-lint-ignore no-explicit-any
   info?: { data?: any; error?: any };
   // deno-lint-ignore no-explicit-any
   chunkUpsert?: { error?: any };
@@ -74,6 +76,18 @@ function fakeDeps(opts: {
               }),
             };
           }
+          if (table === "projects") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve(
+                      opts.project ?? { data: { bucket: null }, error: null },
+                    ),
+                }),
+              }),
+            };
+          }
           if (table === "session_chunks") {
             return {
               // deno-lint-ignore no-explicit-any
@@ -104,10 +118,7 @@ function fakeDeps(opts: {
           throw new Error(`unexpected table ${table}`);
         },
         storage: {
-          from(bucket: string) {
-            if (bucket !== "carryon-sessions") {
-              throw new Error(`unexpected bucket ${bucket}`);
-            }
+          from(_bucket: string) {
             return {
               info: () =>
                 Promise.resolve(opts.info ?? { data: {}, error: null }),
@@ -174,6 +185,17 @@ Deno.test("rejects a caller who isn't a project member", async () => {
     fakeDeps({ user: fakeUser(), member: { data: null, error: null } }),
   );
   assertEquals(res.status, 403);
+});
+
+Deno.test("surfaces a project lookup failure as 500", async () => {
+  const res = await handle(
+    req(validBody()),
+    fakeDeps({
+      user: fakeUser(),
+      project: { data: null, error: { code: "XXXXX", message: "boom" } },
+    }),
+  );
+  assertEquals(res.status, 500);
 });
 
 Deno.test("rejects a chunk whose object is missing from storage", async () => {

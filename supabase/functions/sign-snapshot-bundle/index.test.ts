@@ -13,7 +13,10 @@ function fakeDeps(opts: {
   // deno-lint-ignore no-explicit-any
   member?: { data?: any; error?: any };
   // deno-lint-ignore no-explicit-any
+  project?: { data?: any; error?: any };
+  // deno-lint-ignore no-explicit-any
   signedUrl?: { data?: any; error?: any };
+  onStorageFrom?: (bucket: string) => void;
 }): Deps {
   return {
     requireUser: () => Promise.resolve(opts.user as never),
@@ -52,13 +55,23 @@ function fakeDeps(opts: {
               }),
             };
           }
+          if (table === "projects") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve(
+                      opts.project ?? { data: { bucket: null }, error: null },
+                    ),
+                }),
+              }),
+            };
+          }
           throw new Error(`unexpected table ${table}`);
         },
         storage: {
           from(bucket: string) {
-            if (bucket !== "carryon-sessions") {
-              throw new Error(`unexpected bucket ${bucket}`);
-            }
+            opts.onStorageFrom?.(bucket);
             return {
               createSignedUploadUrl: () =>
                 Promise.resolve(
@@ -139,6 +152,34 @@ Deno.test("returns a signed upload token and the derived object key", async () =
     body.objectKey,
     "p1/u1/11111111-1111-4111-8111-111111111111/code-0.bundle",
   );
+  assertEquals(body.bucket, "carryon-sessions");
+});
+
+Deno.test("CO-305: signs against a project's dedicated bucket when it has one", async () => {
+  let signedBucket: string | undefined;
+  const deps = fakeDeps({
+    user: fakeUser("u1"),
+    project: { data: { bucket: "client-x-bucket" }, error: null },
+    onStorageFrom: (bucket) => {
+      signedBucket = bucket;
+    },
+  });
+
+  const res = await handle(req(validBody()), deps);
+  assertEquals(res.status, 200);
+  const body = await res.json();
+  assertEquals(body.bucket, "client-x-bucket");
+  assertEquals(signedBucket, "client-x-bucket");
+});
+
+Deno.test("surfaces a project lookup failure as 500", async () => {
+  const deps = fakeDeps({
+    user: fakeUser(),
+    project: { data: null, error: { code: "XXXXX", message: "boom" } },
+  });
+
+  const res = await handle(req(validBody()), deps);
+  assertEquals(res.status, 500);
 });
 
 Deno.test("derives the object key from the session's own stored project/user, not the caller's", async () => {

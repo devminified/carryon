@@ -31,6 +31,7 @@ import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";
 import { chunkObjectKey } from "../_shared/chunks.ts";
 import { memberRole } from "../_shared/membership.ts";
+import { resolveBucket } from "../_shared/storage.ts";
 import {
   adminClient as realAdminClient,
   requireUser as realRequireUser,
@@ -65,8 +66,6 @@ const defaultDeps: Deps = {
   adminClient: realAdminClient,
   requireUser: realRequireUser,
 };
-
-const BUCKET = "carryon-sessions";
 
 export async function handle(
   req: Request,
@@ -118,6 +117,19 @@ export async function handle(
     return errorResponse(403, "forbidden");
   }
 
+  // CO-305: resolve the same bucket register-chunk signed the upload
+  // URL against.
+  const { data: project, error: projectErr } = await admin
+    .from("projects")
+    .select("bucket")
+    .eq("id", session.project_id)
+    .maybeSingle();
+  if (projectErr) {
+    console.error("confirm-chunk: project lookup failed", projectErr.code);
+    return errorResponse(500, "internal_error");
+  }
+  const bucket = resolveBucket(project);
+
   const objectKey = chunkObjectKey(
     session.project_id,
     session.user_id,
@@ -126,7 +138,7 @@ export async function handle(
     input.seq,
   );
 
-  const { error: infoErr } = await admin.storage.from(BUCKET).info(
+  const { error: infoErr } = await admin.storage.from(bucket).info(
     objectKey,
   );
   if (infoErr) {

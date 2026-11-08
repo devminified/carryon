@@ -49,11 +49,13 @@ type SignSnapshotBundleInput struct {
 // SignSnapshotBundleResult is sign-snapshot-bundle's response: a signed
 // Storage upload token (not a full URL — see RegisterChunkResult's doc
 // comment for why: the Edge Function's own signed URL bakes in its
-// internal SUPABASE_URL) and the object key confirm-chunk-style
-// verification will later check for.
+// internal SUPABASE_URL), the object key confirm-chunk-style
+// verification will later check for, and the bucket (CO-305) the token
+// was signed against.
 type SignSnapshotBundleResult struct {
 	UploadToken string `json:"uploadToken"`
 	ObjectKey   string `json:"objectKey"`
+	Bucket      string `json:"bucket"`
 }
 
 // SignSnapshotBundle calls the sign-snapshot-bundle Edge Function

@@ -92,6 +92,7 @@ func (b *fakeBackend) handleRegister(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"uploadToken": "fake-token-for-" + objectKey,
 		"objectKey":   objectKey,
+		"bucket":      "carryon-sessions",
 	})
 }
 

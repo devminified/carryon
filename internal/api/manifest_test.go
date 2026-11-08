@@ -136,8 +136,17 @@ func TestGetManifestForbidden(t *testing.T) {
 
 func TestStorageDownloadURL(t *testing.T) {
 	c := NewClient("https://xyz.supabase.co", "anon-key")
-	got := c.StorageDownloadURL("p1/u1/s1/main/chunk-0.jsonl.zst", "tok with spaces")
+	got := c.StorageDownloadURL("carryon-sessions", "p1/u1/s1/main/chunk-0.jsonl.zst", "tok with spaces")
 	want := "https://xyz.supabase.co/storage/v1/object/sign/carryon-sessions/p1/u1/s1/main/chunk-0.jsonl.zst?token=tok+with+spaces"
+	if got != want {
+		t.Errorf("StorageDownloadURL() = %q, want %q", got, want)
+	}
+}
+
+func TestStorageDownloadURLUsesAProjectsDedicatedBucket(t *testing.T) {
+	c := NewClient("https://xyz.supabase.co", "anon-key")
+	got := c.StorageDownloadURL("client-x-bucket", "p1/u1/s1/main/chunk-0.jsonl.zst", "tok")
+	want := "https://xyz.supabase.co/storage/v1/object/sign/client-x-bucket/p1/u1/s1/main/chunk-0.jsonl.zst?token=tok"
 	if got != want {
 		t.Errorf("StorageDownloadURL() = %q, want %q", got, want)
 	}

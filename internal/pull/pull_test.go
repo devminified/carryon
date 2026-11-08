@@ -53,6 +53,7 @@ func splitChunks(streamID string, data []byte, chunkSize int) []api.ManifestChun
 		chunks = append(chunks, api.ManifestChunk{
 			StreamID: streamID, Seq: seq, ByteStart: int64(start), ByteEnd: int64(end),
 			SHA256: sha256Hex(piece), ObjectKey: key, DownloadToken: key,
+			Bucket: "carryon-sessions",
 		})
 	}
 	return chunks
@@ -231,6 +232,7 @@ func TestRebuildAcceptsAChunkWhoseDecompressedLengthDiffersFromItsByteRange(t *t
 		// actually stored — a real, expected mismatch now, not a bug.
 		ByteStart: 0, ByteEnd: int64(len(redacted)) + 20,
 		SHA256: sha256Hex(redacted), ObjectKey: "main-0", DownloadToken: "main-0",
+		Bucket: "carryon-sessions",
 	}}
 
 	manifest := &api.Manifest{Chunks: chunks}

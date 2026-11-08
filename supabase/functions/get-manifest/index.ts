@@ -26,6 +26,7 @@
 import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";
 import { hasMinRole } from "../_shared/membership.ts";
+import { resolveBucket } from "../_shared/storage.ts";
 import {
   adminClient as realAdminClient,
   callerClient as realCallerClient,
@@ -35,8 +36,6 @@ import {
 const Input = z.object({
   sessionId: z.string().uuid(),
 });
-
-const BUCKET = "carryon-sessions";
 
 // Signed download URLs are capped at 5 minutes (redaction.md) — this is
 // the one Storage URL shape in this codebase that genuinely needs to be
@@ -70,10 +69,11 @@ type AdminClient = any;
 // already-correct api_url (mirroring Client.StorageUploadURL).
 async function signDownloadToken(
   admin: AdminClient,
+  bucket: string,
   objectKey: string,
 ): Promise<string | null> {
   const { data: signed, error } = await admin.storage
-    .from(BUCKET)
+    .from(bucket)
     .createSignedUrl(objectKey, DOWNLOAD_URL_TTL_SECONDS);
   if (error || !signed) {
     console.error("get-manifest: signing download url failed", error);
@@ -155,13 +155,14 @@ export async function handle(
   // through list-sessions just for these two columns.
   const { data: project, error: projectErr } = await admin
     .from("projects")
-    .select("name, git_remote")
+    .select("name, git_remote, bucket")
     .eq("id", session.project_id)
     .maybeSingle();
   if (projectErr || !project) {
     console.error("get-manifest: project lookup failed", projectErr?.code);
     return errorResponse(500, "internal_error");
   }
+  const bucket = resolveBucket(project);
 
   const { data: owner, error: ownerErr } = await admin.auth.admin
     .getUserById(session.user_id);
@@ -184,7 +185,11 @@ export async function handle(
 
   const chunks = [];
   for (const row of chunkRows ?? []) {
-    const downloadToken = await signDownloadToken(admin, row.object_key);
+    const downloadToken = await signDownloadToken(
+      admin,
+      bucket,
+      row.object_key,
+    );
     if (downloadToken === null) {
       return errorResponse(500, "internal_error");
     }
@@ -196,6 +201,7 @@ export async function handle(
       sha256: row.sha256,
       objectKey: row.object_key,
       downloadToken,
+      bucket,
     });
   }
 
@@ -224,6 +230,7 @@ export async function handle(
     } else if (snapshotRow.object_key) {
       const downloadToken = await signDownloadToken(
         admin,
+        bucket,
         snapshotRow.object_key,
       );
       if (downloadToken === null) {
@@ -231,6 +238,7 @@ export async function handle(
       }
       snapshot.objectKey = snapshotRow.object_key;
       snapshot.downloadToken = downloadToken;
+      snapshot.bucket = bucket;
     }
   }
 

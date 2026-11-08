@@ -30,6 +30,7 @@ import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";
 import { memberRole } from "../_shared/membership.ts";
 import { bundleObjectKey } from "../_shared/snapshots.ts";
+import { resolveBucket } from "../_shared/storage.ts";
 import {
   adminClient as realAdminClient,
   requireUser as realRequireUser,
@@ -42,8 +43,6 @@ const Input = z.object({
   wipRef: z.string().min(1).max(500).optional(),
   treeSha: z.string().min(1).max(64),
 });
-
-const BUCKET = "carryon-sessions";
 
 // Deps exists so tests can inject fakes for the two Supabase calls
 // without a live instance — see index.test.ts.
@@ -109,13 +108,29 @@ export async function handle(
 
   let objectKey: string | null = null;
   if (!input.wipRef) {
+    // CO-305: resolve the same bucket sign-snapshot-bundle signed the
+    // upload URL against.
+    const { data: project, error: projectErr } = await admin
+      .from("projects")
+      .select("bucket")
+      .eq("id", session.project_id)
+      .maybeSingle();
+    if (projectErr) {
+      console.error(
+        "register-snapshot: project lookup failed",
+        projectErr.code,
+      );
+      return errorResponse(500, "internal_error");
+    }
+    const bucket = resolveBucket(project);
+
     objectKey = bundleObjectKey(
       session.project_id,
       session.user_id,
       input.sessionId,
       input.seq,
     );
-    const { error: infoErr } = await admin.storage.from(BUCKET).info(
+    const { error: infoErr } = await admin.storage.from(bucket).info(
       objectKey,
     );
     if (infoErr) {
