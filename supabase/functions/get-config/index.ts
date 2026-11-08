@@ -9,6 +9,13 @@
 // server-side change can narrow what the laptop catches, but can never
 // inject a pattern this binary would execute against a developer's
 // own transcript content. See internal/redact's Rule doc comment.
+//
+// pinnedVersion (CO-308) is otherwise unrelated to redaction — it
+// lives on this same row because the ticket's own instruction is to
+// expose it through get-config, not a new endpoint (see the CO-308
+// migration's own comment). null means no pin; internal/update's
+// ShouldUpdate treats a set value as a ceiling the daily update check
+// never goes past.
 
 import { errorResponse, json } from "../_shared/http.ts";
 import {
@@ -42,7 +49,7 @@ export async function handle(
   const admin = deps.adminClient();
   const { data: config, error } = await admin
     .from("redaction_config")
-    .select("disabled_rule_ids, denylist_additions")
+    .select("disabled_rule_ids, denylist_additions, pinned_version")
     .eq("id", "default")
     .maybeSingle();
   if (error) {
@@ -53,6 +60,7 @@ export async function handle(
   return json({
     disabledRuleIds: config?.disabled_rule_ids ?? [],
     denylistAdditions: config?.denylist_additions ?? [],
+    pinnedVersion: config?.pinned_version ?? null,
   }, 200);
 }
 

@@ -18,9 +18,100 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+
+      # Builds every target (including the bare, unpacked binaries
+      # carryon-sign-manifest signs below), the .deb packages, and the
+      # Homebrew formula file — but publishes nothing yet. This has to
+      # run exactly once: rebuilding afterward would embed a different
+      # -X main.date={{.Date}} in each binary (goreleaser's own
+      # timestamp template), which would make the manifest's signed
+      # checksums not match whatever actually gets uploaded. Signing
+      # and the real GitHub release/asset upload below both operate on
+      # this one build's own dist/ output, never a second build.
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: v2.20.0
-          args: release --clean
+          args: release --clean --skip=publish
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPDATE_PUBLIC_KEY_HEX: ${{ secrets.UPDATE_PUBLIC_KEY_HEX }}
+
+      # CO-308's own signed release manifest (internal/update's
+      # ParseAndVerify counterpart) — skipped gracefully, not a build
+      # failure, until a human has provisioned a real production
+      # signing key (see docs/co-308-fleet-rollout.md's one-time
+      # external setup step). Builds without a manifest.json simply
+      # mean every laptop's daily update check stays a no-op, which is
+      # the same safe default main.go's own updatePublicKeyHex = ""
+      # already documents.
+      # goreleaser's own "carryon-raw" archive (formats: [binary]) only
+      # registers a checksummed *alias* for each per-target build's
+      # binary — it does NOT write a renamed top-level copy (verified
+      # against a real snapshot build: dist/artifacts.json names the
+      # alias "carryon_darwin_arm64", but its own "path" field still
+      # points at dist/carryon_darwin_arm64_v8.0/carryon). Every
+      # platform's binary is still littered under the SAME basename
+      # ("carryon", or "carryon.exe" on Windows) in its own build
+      # subdirectory, so uploading those paths directly would collide
+      # on a single asset name — materialize real, uniquely-named
+      # files here instead, matching exactly what the signed
+      # manifest's own asset URLs (and carryon-sign-manifest's -asset
+      # flags) name below.
+      - name: materialize uniquely-named bare binaries
+        run: |
+          cp dist/carryon_darwin_arm64_v8.0/carryon dist/carryon_darwin_arm64
+          cp dist/carryon_darwin_amd64_v1/carryon dist/carryon_darwin_amd64
+          cp dist/carryon_linux_amd64_v1/carryon dist/carryon_linux_amd64
+          cp dist/carryon_linux_arm64_v8.0/carryon dist/carryon_linux_arm64
+          cp dist/carryon_windows_amd64_v1/carryon.exe dist/carryon_windows_amd64.exe
+
+      # Checks the secret's presence inside the shell step itself,
+      # rather than a step-level `if: secrets.X != ''` — referencing
+      # the secrets context directly in a conditional is unreliable
+      # (GitHub's own guidance: prefer passing it through env: and
+      # checking that instead), so this just exits 0 early when unset.
+      - name: sign the release manifest
+        run: |
+          if [ -z "$UPDATE_SIGNING_PRIVATE_KEY_HEX" ]; then
+            echo "no UPDATE_SIGNING_PRIVATE_KEY_HEX secret configured yet — skipping manifest signing (see docs/co-308-fleet-rollout.md)"
+            exit 0
+          fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          ./dist/carryon-sign-manifest_linux_amd64_v1/carryon-sign-manifest sign \
+            -version "$VERSION" \
+            -private-key-hex "$UPDATE_SIGNING_PRIVATE_KEY_HEX" \
+            -base-url "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}" \
+            -asset darwin/arm64=dist/carryon_darwin_arm64 \
+            -asset darwin/amd64=dist/carryon_darwin_amd64 \
+            -asset linux/amd64=dist/carryon_linux_amd64 \
+            -asset linux/arm64=dist/carryon_linux_arm64 \
+            -asset windows/amd64=dist/carryon_windows_amd64.exe \
+            -out dist/manifest.json
+        env:
+          UPDATE_SIGNING_PRIVATE_KEY_HEX: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY_HEX }}
+
+      # The actual GitHub release + asset upload, via gh rather than
+      # goreleaser's own publish step — see this workflow's own reason
+      # above for why there's no second goreleaser invocation to do it
+      # instead. The bare binaries (no file extension, except
+      # carryon_windows_amd64.exe) are the signing step's own assets,
+      # above; dist/manifest.json is included only when that step ran.
+      - name: create the GitHub release
+        run: |
+          ASSETS="dist/*.tar.gz dist/*.zip dist/*.deb dist/checksums.txt"
+          ASSETS="$ASSETS dist/carryon_darwin_arm64 dist/carryon_darwin_amd64"
+          ASSETS="$ASSETS dist/carryon_linux_amd64 dist/carryon_linux_arm64"
+          ASSETS="$ASSETS dist/carryon_windows_amd64.exe"
+          if [ -f dist/manifest.json ]; then
+            ASSETS="$ASSETS dist/manifest.json"
+          fi
+          gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes $ASSETS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Homebrew tap (devminified/homebrew-tap), winget submission, and
+      # signed-MSI publishing are all deferred, external, one-time (or
+      # per-release) steps a human does once their own prerequisite
+      # setup exists — see docs/co-308-fleet-rollout.md. dist/homebrew/
+      # carryon.rb is still generated above by goreleaser's own
+      # (deprecated-but-working) brews: config; it's just not pushed
+      # anywhere by this workflow yet.

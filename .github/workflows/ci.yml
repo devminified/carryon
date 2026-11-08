@@ -75,6 +75,15 @@ jobs:
         with:
           version: v2.20.0
           args: build --snapshot --clean
+        env:
+          # CO-308: -ldflags templates {{.Env.UPDATE_PUBLIC_KEY_HEX}} —
+          # goreleaser's own template engine errors outright on a truly
+          # *unset* env var (found via a real CI failure; unlike a plain
+          # Go template, it doesn't degrade a missing map key to "").
+          # An explicitly-empty value here matches the same "no
+          # production signing key provisioned yet" default main.go's
+          # own updatePublicKeyHex = "" already documents.
+          UPDATE_PUBLIC_KEY_HEX: ""
       - name: check binary size (under 25 MB per target, NFR-01)
         run: |
           find dist -type f \( -name 'carryon' -o -name 'carryon.exe' \) -print0 \

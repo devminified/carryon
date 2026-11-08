@@ -1,0 +1,15 @@
+-- CO-308: "Admins can pin a version in get-config" — the ticket's own
+-- literal instruction is to extend get-config, not add a new named
+-- RPC, so pinned_version lives on the same single-row redaction_config
+-- table get-config already reads (CO-301's own "one row is enough, no
+-- per-project scoping" reasoning applies here too: there's no per-
+-- project fleet policy in the current build plan). It's otherwise
+-- unrelated to redaction — the column name says so plainly, and
+-- get-config's own doc comment explains why this ticket's instruction
+-- is followed literally over splitting it into its own table.
+--
+-- null means "no pin" — every laptop updates to whatever the latest
+-- signed manifest names. A set value is a ceiling the daily update
+-- check (internal/update) never goes past — see that package's own
+-- ShouldUpdate doc comment for the exact semantics.
+alter table redaction_config add column pinned_version text;
