@@ -63,6 +63,80 @@ jobs:
       - name: deno test
         run: deno test --allow-net --allow-env supabase/functions
 
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: build (dummy anon key — no local Supabase in this job)
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54421
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_ci_build_placeholder
+          # a recognizable, non-secret marker — grepped for below to prove
+          # the service-role key never reaches a client-shipped file,
+          # regardless of what the real value is in any environment
+          # (CO-401's own "grep of the bundle shows no service-role key"
+          # testing point, made into a real empirical check rather than
+          # "true by construction because nothing imports admin.ts yet").
+          SUPABASE_SERVICE_ROLE_KEY: service-role-key-must-never-reach-the-client-bundle
+      - name: grep client bundle for service-role key leakage (CO-401)
+        run: |
+          if grep -rq "service-role-key-must-never-reach-the-client-bundle" .next/static/ 2>/dev/null; then
+            echo "SUPABASE_SERVICE_ROLE_KEY leaked into the client bundle"
+            exit 1
+          fi
+
+  web-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.111.0
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.1.4
+      - name: start local stack (applies every migration + seed.sql)
+        run: supabase start
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: web
+      - run: pnpm test:e2e
+        working-directory: web
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54421
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 7
+
   cross-compile:
     runs-on: ubuntu-latest
     needs: [lint, test]

@@ -129,6 +129,10 @@ goreleaser build --snapshot --clean   # cross-compiles all 5 release targets int
 
 CI (`.github/workflows/ci.yml`) runs the same checks, plus `go build`/`go test -race` on macOS, Linux, and Windows runners, on every pull request.
 
+### Web app (`web/`)
+
+Next.js + `@supabase/ssr`, GitHub sign-in — see `web/README.md`. CI runs `lint`/`typecheck`/`test`/`build` (the `web` job) and a Playwright suite against local Supabase (the `web-e2e` job) on every pull request.
+
 ### Releasing
 
 Pushing a `v*` tag to `main` triggers `.github/workflows/release.yml`, which runs `goreleaser release --clean` and publishes a GitHub Release with the same 5 archives, checksummed:

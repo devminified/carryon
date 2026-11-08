@@ -69,27 +69,31 @@ carryon/
 │   └── src/
 │       ├── app/                        routes — THIN, no business logic
 │       │   ├── (auth)/login/page.tsx
+│       │   ├── auth/callback/route.ts  exchanges the GitHub OAuth code for a session (CO-401)
 │       │   ├── (dashboard)/
-│       │   │   ├── layout.tsx          auth-gated shell
-│       │   │   ├── projects/page.tsx
-│       │   │   ├── sessions/page.tsx
+│       │   │   ├── layout.tsx          auth-gated shell: top bar, project switcher, user menu (CO-401)
+│       │   │   ├── page.tsx            overview — CO-401 ships a bare project-list placeholder; CO-402 replaces it with the real per-project session list
+│       │   │   ├── p/[project]/page.tsx  CO-401 ships a bare role-gated placeholder; CO-402 builds out the real session list here
 │       │   │   ├── sessions/[id]/page.tsx
 │       │   │   └── admin/page.tsx
 │       │   └── api/                    only when Server Actions genuinely don't fit
 │       ├── modules/                    vertical slices, one per domain
+│       │   ├── auth/                   sign-in form, user menu, sign-out action (CO-401) — no types.ts/schemas.ts of its own yet, nothing non-trivial to type beyond what shared/lib/auth.ts already exports
+│       │   │   ├── data/actions.ts     signOut() — a 'use server' function bound straight to a <form action={...}>, not a table mutation; see layers.md's note on why ui/ may import this but not data/queries.ts
+│       │   │   └── ui/{login-form,user-menu}.tsx
 │       │   ├── sessions/
 │       │   │   ├── types.ts, schemas.ts
 │       │   │   ├── data/{queries,mutations,actions,keys}.ts
 │       │   │   ├── hooks/
 │       │   │   └── ui/
-│       │   ├── projects/
+│       │   ├── projects/               types.ts, data/queries.ts (CO-401: listProjectsForCurrentUser, getProjectForCurrentUser), ui/project-switcher.tsx
 │       │   └── admin/
 │       ├── shared/
 │       │   ├── constants/{roles.ts, routes.ts}
 │       │   ├── types/{database.types.ts, auth.ts, common.ts}  # database.types.ts is generated — DO NOT EDIT
 │       │   ├── lib/{supabase/{client,server,admin}.ts, format/, auth.ts, utils.ts}
 │       │   └── ui/                     reusable presentational components, shadcn generated code
-│       └── middleware.ts               auth refresh, route protection
+│       └── proxy.ts                    auth refresh, route protection — Next.js 16 renamed middleware.ts to proxy.ts (same mechanism); see node_modules/next/dist/docs/.../middleware.md
 │
 ├── docs/                                long-form specs, requirements, decisions — e.g. docs/co-302-role-matrix.md
 │

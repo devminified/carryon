@@ -1,14 +1,16 @@
 # Layer Rules in Detail (`web/`)
 
-Applies to `web/src/modules/{sessions,projects,admin}/`. Same layering as the directory default, reskinned to Carryon's domain.
+Applies to `web/src/modules/{auth,sessions,projects,admin}/`. Same layering as the directory default, reskinned to Carryon's domain.
 
 ```
 types      →  TypeScript types only, no runtime code
 schemas    →  Zod schemas, may import types
 data       →  Supabase queries/mutations, may import types/schemas
 hooks      →  TanStack Query (only when needed) + custom hooks
-ui         →  components, may import hooks/types/schemas — NEVER data
+ui         →  components, may import hooks/types/schemas — NEVER data/queries.ts or data/keys.ts
 ```
+
+**One narrow exception to "ui never imports data":** a `ui/` component may import a `data/actions.ts` or `data/mutations.ts` export directly when binding it as a `<form action={...}>` or passing it to `useActionState` (CO-401's `user-menu.tsx` imports `signOut` from `auth/data/actions.ts` this way; `react-19-hooks.md`'s own `rename-session-form.tsx` example does the same). That's the normal shape a Server Action takes to reach a form — there's no props-based alternative. What's still forbidden is a `ui/` component importing `data/queries.ts` (or `data/keys.ts`) to fetch its own data instead of receiving it as a prop from a Server Component.
 
 ## `types.ts`
 
