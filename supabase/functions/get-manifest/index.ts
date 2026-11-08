@@ -12,15 +12,23 @@
 // transcript/code content (database-rls.md's "reads of sensitive data
 // are audited too").
 //
-// Requires resumer role or higher (CO-302 will enforce this in RLS; until
-// then this function checks project_members directly, the same stopgap
-// every other function in this phase uses).
-
+// Requires resumer role or higher. CO-302 landed the real
+// project_members select policy ("any member can read the member
+// list"), so the role check itself now reads via the caller's own
+// client — a true non-member gets zero rows under RLS, the same answer
+// hasMinRole(null, ...) already gave, just backed by the database
+// instead of trusted from a single admin-client query. Everything else
+// here (the session/project/chunk/snapshot reads, the signed URLs, the
+// audit insert) stays on the service role: get-manifest's own sessions
+// select is intentionally broader than "resumer+" (any viewer can read
+// session metadata), and signing downloads / writing the audit row
+// aren't expressible via RLS at all.
 import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";
-import { hasMinRole, memberRole } from "../_shared/membership.ts";
+import { hasMinRole } from "../_shared/membership.ts";
 import {
   adminClient as realAdminClient,
+  callerClient as realCallerClient,
   requireUser as realRequireUser,
 } from "../_shared/supabase.ts";
 
@@ -38,11 +46,13 @@ const DOWNLOAD_URL_TTL_SECONDS = 300;
 
 export interface Deps {
   adminClient: typeof realAdminClient;
+  callerClient: typeof realCallerClient;
   requireUser: typeof realRequireUser;
 }
 
 const defaultDeps: Deps = {
   adminClient: realAdminClient,
+  callerClient: realCallerClient,
   requireUser: realRequireUser,
 };
 
@@ -118,14 +128,22 @@ export async function handle(
     return errorResponse(404, "not_found", "no such session");
   }
 
-  let role: string | null;
-  try {
-    role = await memberRole(admin, session.project_id, user.id);
-  } catch (e) {
-    console.error("get-manifest: membership lookup failed", e);
+  // RLS's own "any member can read the member list" policy means a
+  // true non-member's query here returns zero rows, not an error — so
+  // this is the database itself answering "what's my role," not an
+  // app-level check trusted to match it.
+  const caller = deps.callerClient(req.headers.get("Authorization")!);
+  const { data: memberRow, error: memberErr } = await caller
+    .from("project_members")
+    .select("role")
+    .eq("project_id", session.project_id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (memberErr) {
+    console.error("get-manifest: membership lookup failed", memberErr.code);
     return errorResponse(500, "internal_error");
   }
-  if (!hasMinRole(role, "resumer")) {
+  if (!hasMinRole(memberRow?.role ?? null, "resumer")) {
     return errorResponse(403, "forbidden");
   }
 

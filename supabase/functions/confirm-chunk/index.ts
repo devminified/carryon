@@ -17,10 +17,14 @@
 // a resumed session (same ID, new chunks after 'ended') go back to
 // 'live' with no special-cased "is this a resume" branch.
 //
-// Service role for the writes (CO-102: until CO-302's RLS policies land),
-// but identity and membership are still enforced here from the caller's
-// own JWT. The object key is derived server-side from the session's own
-// stored project_id/user_id, never taken from client input — a
+// Service role for the writes — CO-302's own insert policy on
+// session_chunks already requires the caller to be the session's
+// owner, so this function's manual check isn't adding a rule RLS
+// doesn't also have; it stays on the service role because verifying
+// the object actually landed in Storage (above) needs it regardless.
+// Identity and membership are still enforced here from the caller's
+// own JWT. The object key is derived server-side from the session's
+// own stored project_id/user_id, never taken from client input — a
 // client-supplied key could otherwise be pointed at an unrelated object.
 
 import { z } from "npm:zod@4.6.7";

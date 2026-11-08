@@ -19,9 +19,12 @@
 // retried call for the same seq replaces the row instead of erroring or
 // duplicating, same pattern as confirm-chunk.
 //
-// Service role for the write (CO-102: until CO-302's RLS policies land),
-// but identity and membership are still enforced here from the caller's
-// own JWT.
+// Service role for the write — CO-302's own insert/update policies on
+// code_snapshots already require the caller to own the session, so
+// this isn't adding a rule RLS doesn't also have; it stays on the
+// service role for the bundle path's signed download existence check,
+// which needs it regardless of the ref path. Identity and membership
+// are still enforced here from the caller's own JWT.
 
 import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";

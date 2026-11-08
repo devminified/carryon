@@ -39,6 +39,8 @@ carryon/
 │   ├── config.toml
 │   ├── migrations/                     SQL migrations, timestamp-prefixed, RLS in the same file as the table
 │   ├── seed.sql
+│   ├── tests/
+│   │   └── database/                   pgTAP RLS suite (CO-302), one *.sql file per table — see database-rls.md
 │   └── functions/                      Edge Functions (Deno/TypeScript)
 │       ├── register-session/
 │       ├── register-chunk/
@@ -82,6 +84,8 @@ carryon/
 │       │   ├── lib/{supabase/{client,server,admin}.ts, format/, auth.ts, utils.ts}
 │       │   └── ui/                     reusable presentational components, shadcn generated code
 │       └── middleware.ts               auth refresh, route protection
+│
+├── docs/                                long-form specs, requirements, decisions — e.g. docs/co-302-role-matrix.md
 │
 └── test/
     └── fixtures/                       sample sessions and repos, including the fake transcript writer used by CI e2e

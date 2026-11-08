@@ -1,22 +1,25 @@
 // CO-204: backs `carryon ls`. Lists every session the caller can see —
 // any member of the session's project, same as auth.md's access table
 // ("Sees session list: Yes" for viewer/resumer/admin alike; the stricter
-// resumer+ check belongs to get-manifest, not here.
+// resumer+ check belongs to get-manifest, not here).
 //
-// There's no RLS to lean on yet (CO-302), so "can see" is computed here
-// directly from project_members, the same stopgap every function in this
-// phase uses. project/status/since are filtered in SQL; dev is filtered
-// after the fact because a GitHub login lives in auth.users' metadata,
-// which isn't reachable from a plain project_members/sessions query (the
-// auth schema isn't exposed to PostgREST — see auth.md). This is fine at
-// this project's actual scale (CLAUDE.md: no speculative scale) — it
-// would need real server-side filtering (a denormalized login column, or
+// CO-302 landed real RLS policies, so "can see" is now just whatever
+// the sessions/projects select policies already return for the
+// caller's own client — no more hand-computing accessible project IDs
+// from project_members first. dev is still filtered after the fact
+// because a GitHub login lives in auth.users' metadata, which isn't
+// reachable from a plain sessions/projects query (the auth schema isn't
+// exposed to PostgREST — see auth.md) — that lookup is the one part of
+// this function that still needs the service role. This is fine at this
+// project's actual scale (CLAUDE.md: no speculative scale) — it would
+// need real server-side filtering (a denormalized login column, or
 // joining a synced table) well before FETCH_CAP below is actually tight.
 
 import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";
 import {
   adminClient as realAdminClient,
+  callerClient as realCallerClient,
   requireUser as realRequireUser,
 } from "../_shared/supabase.ts";
 
@@ -36,11 +39,13 @@ const DEFAULT_LIMIT = 50;
 
 export interface Deps {
   adminClient: typeof realAdminClient;
+  callerClient: typeof realCallerClient;
   requireUser: typeof realRequireUser;
 }
 
 const defaultDeps: Deps = {
   adminClient: realAdminClient,
+  callerClient: realCallerClient,
   requireUser: realRequireUser,
 };
 
@@ -52,7 +57,8 @@ export async function handle(
     return errorResponse(405, "method_not_allowed");
   }
 
-  const user = await deps.requireUser(req.headers.get("Authorization"));
+  const authHeader = req.headers.get("Authorization");
+  const user = await deps.requireUser(authHeader);
   if (!user) {
     return errorResponse(401, "unauthorized");
   }
@@ -68,31 +74,14 @@ export async function handle(
     );
   }
 
-  const admin = deps.adminClient();
+  // Every query below runs as the caller — RLS already restricts
+  // "projects" and "sessions" to exactly what this user can see
+  // (owns, or is a viewer/resumer/admin member of).
+  const caller = deps.callerClient(authHeader!);
 
-  const { data: memberships, error: membershipErr } = await admin
-    .from("project_members")
-    .select("project_id")
-    .eq("user_id", user.id);
-  if (membershipErr) {
-    console.error(
-      "list-sessions: membership lookup failed",
-      membershipErr.code,
-    );
-    return errorResponse(500, "internal_error");
-  }
-
-  const accessibleProjectIds = (memberships ?? []).map((
-    m: { project_id: string },
-  ) => m.project_id);
-  if (accessibleProjectIds.length === 0) {
-    return json({ sessions: [] }, 200);
-  }
-
-  const { data: projectRows, error: projectsErr } = await admin
+  const { data: projectRows, error: projectsErr } = await caller
     .from("projects")
-    .select("id, name")
-    .in("id", accessibleProjectIds);
+    .select("id, name");
   if (projectsErr) {
     console.error("list-sessions: project lookup failed", projectsErr.code);
     return errorResponse(500, "internal_error");
@@ -104,23 +93,21 @@ export async function handle(
     ) => [p.id, p.name]),
   );
 
-  let candidateProjectIds = accessibleProjectIds;
+  let query = caller
+    .from("sessions")
+    .select("id, project_id, user_id, branch, title, last_activity_at, status")
+    .order("last_activity_at", { ascending: false })
+    .limit(FETCH_CAP);
   if (input.project) {
     const wanted = input.project.toLowerCase();
-    candidateProjectIds = (projectRows ?? [])
+    const candidateProjectIds = (projectRows ?? [])
       .filter((p: { name: string }) => p.name.toLowerCase() === wanted)
       .map((p: { id: string }) => p.id);
     if (candidateProjectIds.length === 0) {
       return json({ sessions: [] }, 200);
     }
+    query = query.in("project_id", candidateProjectIds);
   }
-
-  let query = admin
-    .from("sessions")
-    .select("id, project_id, user_id, branch, title, last_activity_at, status")
-    .in("project_id", candidateProjectIds)
-    .order("last_activity_at", { ascending: false })
-    .limit(FETCH_CAP);
   if (input.status) {
     query = query.eq("status", input.status);
   }
@@ -137,6 +124,9 @@ export async function handle(
   // deno-lint-ignore no-explicit-any
   const rows: any[] = sessionRows ?? [];
 
+  // auth.users' metadata isn't reachable via PostgREST/RLS at all — the
+  // one lookup in this function that still needs the service role.
+  const admin = deps.adminClient();
   const uniqueUserIds = [...new Set(rows.map((r) => r.user_id as string))];
   const loginById = new Map<string, string | null>();
   for (const uid of uniqueUserIds) {

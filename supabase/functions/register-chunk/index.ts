@@ -7,8 +7,12 @@
 // object key. confirm-chunk (CO-111) owns last_activity_at/total_bytes/
 // status on every confirmed chunk.
 //
-// Service role for the writes (CO-102: until CO-302's RLS policies land),
-// but identity and membership are still enforced here from the caller's
+// Service role for the writes — CO-302's session_chunks/sessions
+// policies exist now, but this function legitimately still needs the
+// service role for two things RLS can't do: signing the chunk's
+// upload URL, and (on the very first chunk) creating the sessions row
+// itself before any session-scoped policy has a row to apply to.
+// Identity and membership are still enforced here from the caller's
 // own JWT — never trusted from a client-supplied field.
 //
 // The signed URL is requested with upsert:true (x-upsert header — see

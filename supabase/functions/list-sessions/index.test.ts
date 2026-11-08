@@ -35,86 +35,79 @@ const LOGIN_BY_USER: Record<string, string> = {
 function fakeDeps(opts: {
   user?: unknown;
   // deno-lint-ignore no-explicit-any
-  memberships?: { data?: any; error?: any };
-  // deno-lint-ignore no-explicit-any
   projects?: { data?: any; error?: any };
   // deno-lint-ignore no-explicit-any
   sessions?: { data?: any; error?: any };
   // deno-lint-ignore no-explicit-any
   owner?: Record<string, { data?: any; error?: any }>;
 }): Deps {
+  // Every select below runs as the caller (CO-302): RLS itself is what
+  // would normally restrict "projects"/"sessions" to what this user
+  // can see — these fakes stand in for whatever rows RLS would have
+  // already filtered down to, not for the policies themselves (those
+  // are covered for real in supabase/tests/database/*.sql).
+  const callerClientFake = {
+    from(table: string) {
+      if (table === "projects") {
+        return {
+          select: () =>
+            Promise.resolve(
+              opts.projects ??
+                { data: [{ id: "p1", name: "acme-api" }], error: null },
+            ),
+        };
+      }
+      if (table === "sessions") {
+        // deno-lint-ignore no-explicit-any
+        const builder: any = {
+          _status: undefined as string | undefined,
+          _since: undefined as string | undefined,
+          select() {
+            return this;
+          },
+          in() {
+            return this;
+          },
+          order() {
+            return this;
+          },
+          limit() {
+            return this;
+          },
+          eq(_col: string, val: string) {
+            this._status = val;
+            return this;
+          },
+          gte(_col: string, val: string) {
+            this._since = val;
+            return this;
+          },
+          then(resolve: (v: unknown) => unknown) {
+            if (opts.sessions) {
+              return Promise.resolve(opts.sessions).then(resolve);
+            }
+            let data = SESSION_ROWS;
+            if (this._status) {
+              data = data.filter((r) => r.status === this._status);
+            }
+            if (this._since) {
+              data = data.filter((r) => r.last_activity_at >= this._since);
+            }
+            return Promise.resolve({ data, error: null }).then(resolve);
+          },
+        };
+        return builder;
+      }
+      throw new Error(`unexpected table ${table}`);
+    },
+    // deno-lint-ignore no-explicit-any
+  } as any;
+
   return {
     requireUser: () => Promise.resolve(opts.user as never),
+    callerClient: () => callerClientFake,
     adminClient: () =>
       ({
-        from(table: string) {
-          if (table === "project_members") {
-            return {
-              select: () => ({
-                eq: () =>
-                  Promise.resolve(
-                    opts.memberships ??
-                      { data: [{ project_id: "p1" }], error: null },
-                  ),
-              }),
-            };
-          }
-          if (table === "projects") {
-            return {
-              select: () => ({
-                in: () =>
-                  Promise.resolve(
-                    opts.projects ??
-                      { data: [{ id: "p1", name: "acme-api" }], error: null },
-                  ),
-              }),
-            };
-          }
-          if (table === "sessions") {
-            // deno-lint-ignore no-explicit-any
-            const builder: any = {
-              _status: undefined as string | undefined,
-              _since: undefined as string | undefined,
-              select() {
-                return this;
-              },
-              in() {
-                return this;
-              },
-              order() {
-                return this;
-              },
-              limit() {
-                return this;
-              },
-              eq(_col: string, val: string) {
-                this._status = val;
-                return this;
-              },
-              gte(_col: string, val: string) {
-                this._since = val;
-                return this;
-              },
-              then(resolve: (v: unknown) => unknown) {
-                if (opts.sessions) {
-                  return Promise.resolve(opts.sessions).then(
-                    resolve,
-                  );
-                }
-                let data = SESSION_ROWS;
-                if (this._status) {
-                  data = data.filter((r) => r.status === this._status);
-                }
-                if (this._since) {
-                  data = data.filter((r) => r.last_activity_at >= this._since);
-                }
-                return Promise.resolve({ data, error: null }).then(resolve);
-              },
-            };
-            return builder;
-          }
-          throw new Error(`unexpected table ${table}`);
-        },
         auth: {
           admin: {
             getUserById: (uid: string) =>
@@ -164,10 +157,14 @@ Deno.test("rejects an invalid status value", async () => {
   assertEquals(res.status, 400);
 });
 
-Deno.test("a caller with no project memberships gets an empty list, not an error", async () => {
+Deno.test("a caller RLS has filtered down to nothing gets an empty list, not an error", async () => {
   const res = await handle(
     req({}),
-    fakeDeps({ user: fakeUser(), memberships: { data: [], error: null } }),
+    fakeDeps({
+      user: fakeUser(),
+      projects: { data: [], error: null },
+      sessions: { data: [], error: null },
+    }),
   );
   assertEquals(res.status, 200);
   const body = await res.json();
@@ -256,12 +253,23 @@ Deno.test("--limit caps the number of rows returned", async () => {
   assertEquals(body.sessions[0].id, "11111111-1111-4111-8111-111111111111");
 });
 
-Deno.test("surfaces a membership lookup failure as 500", async () => {
+Deno.test("surfaces a projects lookup failure as 500", async () => {
   const res = await handle(
     req({}),
     fakeDeps({
       user: fakeUser(),
-      memberships: { data: null, error: { code: "XXXXX" } },
+      projects: { data: null, error: { code: "XXXXX" } },
+    }),
+  );
+  assertEquals(res.status, 500);
+});
+
+Deno.test("surfaces a sessions query failure as 500", async () => {
+  const res = await handle(
+    req({}),
+    fakeDeps({
+      user: fakeUser(),
+      sessions: { data: null, error: { code: "XXXXX" } },
     }),
   );
   assertEquals(res.status, 500);

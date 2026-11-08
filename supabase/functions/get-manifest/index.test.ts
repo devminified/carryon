@@ -75,21 +75,6 @@ function fakeDeps(opts: {
               }),
             };
           }
-          if (table === "project_members") {
-            return {
-              select: () => ({
-                eq: () => ({
-                  eq: () => ({
-                    maybeSingle: () =>
-                      Promise.resolve(
-                        opts.member ??
-                          { data: { role: "resumer" }, error: null },
-                      ),
-                  }),
-                }),
-              }),
-            };
-          }
           if (table === "session_chunks") {
             return {
               select: () => ({
@@ -199,6 +184,30 @@ function fakeDeps(opts: {
         },
         // deno-lint-ignore no-explicit-any
       }) as any,
+    // CO-302: the role check itself runs as the caller, via RLS's own
+    // "any member can read the member list" policy.
+    callerClient: () =>
+      ({
+        from(table: string) {
+          if (table === "project_members") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () =>
+                      Promise.resolve(
+                        opts.member ??
+                          { data: { role: "resumer" }, error: null },
+                      ),
+                  }),
+                }),
+              }),
+            };
+          }
+          throw new Error(`unexpected table ${table}`);
+        },
+        // deno-lint-ignore no-explicit-any
+      }) as any,
   };
 }
 
@@ -298,6 +307,17 @@ Deno.test("returns session metadata including the owner's github login", async (
   assertEquals(body.session.projectName, "acme-api");
   assertEquals(body.session.gitRemote, "github.com/acme/api");
   assertEquals(body.session.lastActivityAt, "2026-01-01T18:42:00Z");
+});
+
+Deno.test("surfaces a membership lookup failure as 500", async () => {
+  const res = await handle(
+    req({ sessionId: SESSION_ID }),
+    fakeDeps({
+      user: fakeUser(),
+      member: { data: null, error: { code: "XXXXX", message: "boom" } },
+    }),
+  );
+  assertEquals(res.status, 500);
 });
 
 Deno.test("surfaces a project lookup failure as 500", async () => {
