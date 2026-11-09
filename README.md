@@ -4,7 +4,7 @@ Capture every Claude Code session on a registered repo, upload it (redacted) to 
 
 See `Overview.md` for the product pitch and 52-ticket build plan, `Devminified Carryon — System Design Document (SDD).md` for the architecture and invariants, and `Carryon-TRD-Tickets.md` for the full ticket descriptions. `CLAUDE.md` and `.claude/rules/` are the binding engineering conventions for this repo.
 
-**Current status:** Phases 1–3 are complete, through `CO-308` — capture, upload, pull/resume, roles and row-level security, redaction (laptop-side plus a nightly server-side rescan backstop), the audit log, retention/deletion, GitHub-team-mirrored project roles, and fleet packaging with a signed daily auto-update channel. Phase 4 (the web app) is underway: GitHub sign-in, the project/session list, the real session viewer (chat, tool calls, diffs, redaction highlighting), the fork family tree, rename/pin, the condensed-transcript builder, and the AI title/summary job (`CO-401`–`CO-407`) are done; summary display and re-run (`CO-408`) is next.
+**Current status:** Phases 1–4 are complete, through `CO-410`. Phases 1–3 cover the laptop side: capture, upload, pull/resume, roles and row-level security, redaction (laptop-side plus a nightly server-side rescan backstop), the audit log, retention/deletion, GitHub-team-mirrored project roles, and fleet packaging with a signed daily auto-update channel. Phase 4 adds the web app: GitHub sign-in, the project/session list with search, the real session viewer (chat, tool calls, diffs, redaction highlighting, a fork family tree), rename and pin, an AI-generated title/summary for every session (with a manual re-summarize), Slack notifications (blocked-session alerts, a secret-rescan backstop, an opt-in daily digest), and an admin console (`/admin`) for registering projects, managing members, browsing the audit log, watching per-machine agent health, and tuning redaction/update config. Phase 5 (search, hardening, self-hosting, and the public open-source release) is next.
 
 ## Install
 
@@ -95,6 +95,19 @@ Requires Go 1.23+.
 
    A healthy session shows up in `status` with a recent "last upload" time and `0 B` behind within a couple minutes.
 
+## Environment variables
+
+End users installing the `carryon` CLI only ever need `~/.carryon/config.toml` (step 1 above). Everything below is for running or developing the backend and web app — each lives in its own gitignored file, never committed; copy the matching `.env.example` and fill it in.
+
+| File | Used by | What's in it |
+| --- | --- | --- |
+| `~/.carryon/config.toml` | the `carryon` laptop binary | `api_url`, `anon_key` — which backend to talk to. `machine_id` is generated and persisted automatically on first run; never set it by hand. |
+| `.env` (repo root) | local Supabase (`supabase start`) | `SUPABASE_AUTH_EXTERNAL_GITHUB_CLIENT_ID` / `SUPABASE_AUTH_EXTERNAL_GITHUB_SECRET` — a GitHub OAuth App's credentials, so `carryon login` and the web app's sign-in work locally. See `.claude/rules/auth.md` §"GitHub OAuth App setup". |
+| `web/.env.local` | the Next.js web app | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` — the Supabase project to read from (RLS-scoped, safe client-side). `SUPABASE_SERVICE_ROLE_KEY` — server-only, powers the `/admin` console's service-role reads/writes (`requireGlobalAdmin()`, see `.claude/rules/auth.md`); never imported from a client component. |
+| `supabase/functions/.env` (local) / `supabase secrets set` (staging & production) | Edge Functions | `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` / `GITHUB_APP_INSTALLATION_ID` — the GitHub App `sync-github-teams` uses to mirror team membership (`.claude/rules/auth.md` §"GitHub App setup"). `CRON_SECRET`, `RESCAN_CRON_SECRET`, `PURGE_CRON_SECRET`, `SUMMARIZE_CRON_SECRET`, `DIGEST_CRON_SECRET` — one shared secret per scheduled job, each must match a same-named Supabase Vault secret (see each migration's own comment). `ANTHROPIC_API_KEY` — Claude Haiku, for AI titles/summaries; without it, summarization is skipped rather than faked. `WEB_APP_URL` — builds the session link in Slack messages; without it, messages still send with no link. |
+
+Per-project settings (a project's Slack webhook, daily digest opt-in, Storage bucket, retention window, GitHub team mapping, AI token budget) are **not** environment variables — they're rows in Postgres, set through the `/admin` console (`CO-410`) or, for now-legacy settings nothing in the UI covers yet, directly via SQL. See `.claude/rules/database-rls.md`.
+
 ## Commands
 
 | Command | Status | Ticket |
@@ -131,15 +144,15 @@ CI (`.github/workflows/ci.yml`) runs the same checks, plus `go build`/`go test -
 
 ### Web app (`web/`)
 
-Next.js + `@supabase/ssr`, GitHub sign-in — see `web/README.md`. CI runs `lint`/`typecheck`/`test`/`build` (the `web` job) and a Playwright suite against local Supabase (the `web-e2e` job) on every pull request.
+Next.js + `@supabase/ssr`, GitHub sign-in — see `web/README.md`. Lists a developer's projects, a real session viewer (chat, tool calls, diffs, redaction highlighting, the fork family tree), rename/pin, AI summaries with manual re-summarize, and — for an admin of at least one project — the full `/admin` console (register a project, manage members, browse the audit log with CSV export, watch per-machine agent health, tune redaction/update config). CI runs `lint`/`typecheck`/`test`/`build` (the `web` job) and a Playwright suite against local Supabase (the `web-e2e` job) on every pull request.
 
 ### Releasing
 
 Pushing a `v*` tag to `main` triggers `.github/workflows/release.yml`, which runs `goreleaser release --clean` and publishes a GitHub Release with the same 5 archives, checksummed:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 `supabase/functions/**` and `supabase/migrations/**` deploy separately, on every merge to `main` that touches them — not on a tag. See `.claude/rules/commands.md`.
