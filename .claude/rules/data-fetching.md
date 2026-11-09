@@ -20,9 +20,9 @@ After a mutation, the Server Action calls `revalidatePath()` — Next.js re-rend
 
 ## When TanStack Query actually earns its keep here
 
-Carryon's web app is mostly a read-only list/viewer (Doc's "Web UI" row: lists sessions, shows one read-only, copies the pull command) — most screens don't need it. Reach for `useQuery`/`useSuspenseQuery` against a Route Handler (`app/api/.../route.ts`), **not** a Server Action, only for a genuine client-side need:
+Carryon's web app is mostly a read-only list/viewer (Doc's "Web UI" row: lists sessions, shows one read-only, copies the pull command) — most screens don't need it. Reach for `useQuery`/`useSuspenseQuery` against a Route Handler (`app/api/.../route.ts`), **not** a Server Action, only for a genuine client-side need.
 
-- **Search-as-you-type** against the search index (CO-501), once that ships.
+**CO-501 (semantic search) did not end up being this.** The search box's own UX was already a commit-on-Enter/blur round trip through the `q` URL param (same shape plain full-text search had before this ticket, `session-filters.tsx`) — not search-as-you-type — so there was no genuine client-side polling need to justify a Route Handler + TanStack Query layer. `searchSessionsForProject` (`modules/sessions/data/queries.ts`) stays a plain `'server-only'` function the project page's own Server Component calls directly, exactly like `listSessionsForProject` — it just calls the `search` Edge Function (`callEdgeFunction`) instead of running a `.textSearch()` query, then resolves the ranked session IDs back into full rows through the same RLS-scoped client and `resolveLogins` every other read in this file already uses. If a future ticket genuinely wants live as-you-type results, build the Route Handler then — this section's original plan for that is still the right shape when something actually needs it.
 
 **A live session's status is not this** — the ticket's own wording (CO-402) is "Live sessions update through Supabase Realtime," and that's what `modules/sessions/hooks/use-live-sessions.ts` actually does: a real `supabase.channel(...).on('postgres_changes', ...)` subscription (scoped to one project, filtered server-side), not TanStack polling. RLS still gates what a subscriber receives — the migration that adds the table to the `supabase_realtime` publication documents why that's safe.
 

@@ -36,7 +36,7 @@ export function SessionFilters({
       <input
         ref={qInputRef}
         type="search"
-        placeholder="Search title and summary…"
+        placeholder="Search sessions, e.g. “where did we fix duplicate webhooks”…"
         defaultValue={searchParams.get('q') ?? ''}
         onKeyDown={(e) => e.key === 'Enter' && commitSearch()}
         onBlur={commitSearch}

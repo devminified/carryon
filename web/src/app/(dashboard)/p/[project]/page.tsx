@@ -5,6 +5,7 @@ import {
   listBranchesForProject,
   listDevelopersForProject,
   listSessionsForProject,
+  searchSessionsForProject,
 } from '@/modules/sessions/data/queries';
 import { SessionFilters } from '@/modules/sessions/ui/session-filters';
 import { SessionTable } from '@/modules/sessions/ui/session-table';
@@ -55,8 +56,16 @@ export default async function ProjectPage({
   };
   const cursor = decodeCursor(sp.cursor);
 
+  // CO-501: a query switches the page to semantic search results —
+  // ranked by relevance, not paginated (see searchSessionsForProject's
+  // own comment) — instead of the plain, cursor-paginated project list.
   const [{ items, nextCursor }, developers, branches, role] = await Promise.all([
-    listSessionsForProject(projectId, filters, cursor),
+    filters.q
+      ? searchSessionsForProject(projectId, { ...filters, q: filters.q }).then((items) => ({
+          items,
+          nextCursor: null,
+        }))
+      : listSessionsForProject(projectId, filters, cursor),
     listDevelopersForProject(projectId),
     listBranchesForProject(projectId),
     getCurrentRole(projectId),

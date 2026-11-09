@@ -58,7 +58,11 @@ export function SessionTable({
                   <PinButton sessionId={s.id} projectId={projectId} pinned={s.pinned} />
                 ) : (
                   s.pinned && (
-                    <span aria-label="Pinned session" title="Pinned session" className="text-base leading-none">
+                    <span
+                      aria-label="Pinned session"
+                      title="Pinned session"
+                      className="text-base leading-none"
+                    >
                       📌
                     </span>
                   )
@@ -70,6 +74,13 @@ export function SessionTable({
                 </Link>
                 {s.summary && (
                   <p className="text-muted-foreground line-clamp-2 text-xs">{s.summary}</p>
+                )}
+                {/* CO-501: the passage search_sessions matched this session on —
+                    only present on a semantic-search result, never the plain list. */}
+                {s.matchingPassage && (
+                  <p className="mt-1 line-clamp-2 rounded bg-yellow-100 px-1.5 py-0.5 text-xs text-yellow-900">
+                    “{s.matchingPassage}”
+                  </p>
                 )}
                 <div className="text-muted-foreground/70 flex items-center gap-1 text-xs">
                   {s.summary && (

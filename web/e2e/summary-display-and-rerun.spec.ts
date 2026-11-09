@@ -99,8 +99,20 @@ test.describe.serial('summary display and re-run (CO-408)', () => {
   });
 
   test('search finds a session by a phrase from its AI summary', async ({ page, context }) => {
+    // CO-501: the search box now calls the real `search` Edge Function
+    // (gte-small embeds the query, then the real search_sessions SQL
+    // function ranks sessions) — on a freshly started edge runtime
+    // (every CI run, and any local `supabase functions serve` restart)
+    // the embedding model's first real call anywhere in the suite can
+    // cold-start for 30-60s (measured directly, see
+    // docs/co-501-embedding-choice.md). The default 30s test timeout
+    // isn't enough to tell a real cold start apart from a real bug.
+    test.setTimeout(90_000);
+
     await signInAsSeedUser(context, 'ali@devminified.com', 'password123');
-    await page.goto(`/p/${RENAME_PROJECT_B_ID}?q=flaky+payment+webhook`);
+    // navigation's own timeout is separate from the test timeout above
+    // — explicit here so a real cold start doesn't trip it either.
+    await page.goto(`/p/${RENAME_PROJECT_B_ID}?q=flaky+payment+webhook`, { timeout: 90_000 });
 
     await expect(page.getByText('fix the payment webhook retry bug')).toBeVisible();
   });

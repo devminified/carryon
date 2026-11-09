@@ -1,6 +1,8 @@
 import 'server-only';
 import { createClient } from '@/shared/lib/supabase/server';
 import { createAdminClient } from '@/shared/lib/supabase/admin';
+import { callEdgeFunction } from '@/shared/lib/edge-function';
+import { matchesSessionListFilters } from '../lib/search-filters';
 import type { SessionListCursor, SessionListFilters, SessionListItem, SessionRow } from '../types';
 
 export const SESSION_PAGE_SIZE = 50;
@@ -100,12 +102,11 @@ export async function listSessionsForProject(
   if (filters.branch) query = query.eq('branch', filters.branch);
   if (filters.from) query = query.gte('last_activity_at', filters.from);
   if (filters.to) query = query.lte('last_activity_at', filters.to);
-  if (filters.q) {
-    query = query.textSearch('search_vector', filters.q, {
-      type: 'websearch',
-      config: 'english',
-    });
-  }
+  // CO-501: a `q` filter is handled entirely by searchSessionsForProject
+  // below (the project page routes to it instead of calling this
+  // function at all once a query is present) — plain full-text search
+  // over search_vector is superseded by hybrid semantic search, not
+  // run alongside it.
   if (cursor) {
     query = query.or(
       `pinned.lt.${cursor.pinned},` +
@@ -148,4 +149,83 @@ export async function listSessionsForProject(
       : null;
 
   return { items, nextCursor };
+}
+
+interface SearchResponse {
+  results: {
+    sessionId: string;
+    score: number;
+    matchingPassage: string | null;
+  }[];
+}
+
+// CO-501: the project page's search box, once a query is present —
+// calls the `search` Edge Function (embeds the query, ranks sessions
+// via the hybrid search_sessions SQL function, RLS-scoped by the
+// caller's own JWT inside that function) and resolves the ranked IDs
+// back into full SessionListItems through this app's own RLS-scoped
+// client, the same mapping listSessionsForProject uses — so the table
+// UI never has to know whether a row came from the plain list or
+// search. No pagination: results are capped at one bounded page
+// (SEARCH_MATCH_COUNT), ranked by relevance rather than recency, so a
+// "Load more" cursor wouldn't mean anything here.
+const SEARCH_MATCH_COUNT = 50;
+
+export async function searchSessionsForProject(
+  projectId: string,
+  filters: SessionListFilters & { q: string },
+): Promise<SessionListItem[]> {
+  const supabase = await createClient();
+
+  const { results } = await callEdgeFunction<SearchResponse>('search', {
+    query: filters.q,
+    projectId,
+    matchCount: SEARCH_MATCH_COUNT,
+  });
+  if (results.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('*')
+    .in(
+      'id',
+      results.map((r) => r.sessionId),
+    );
+  if (error) throw error;
+
+  const rows = (data ?? []) as SessionRow[];
+  const rowById = new Map(rows.map((r) => [r.id, r]));
+  const logins = await resolveLogins(rows.map((r) => r.user_id));
+
+  return results
+    .map((r) => {
+      const row = rowById.get(r.sessionId);
+      // search_sessions already scopes to what the caller can see via
+      // RLS — a missing row here would mean it was deleted between the
+      // two calls, not an access decision to make twice.
+      if (!row) return null;
+      const item: SessionListItem = {
+        id: row.id,
+        projectId: row.project_id,
+        userId: row.user_id,
+        title: row.title,
+        summary: row.summary,
+        branch: row.branch,
+        status: row.status,
+        outcome: row.outcome,
+        blockedReason: row.blocked_reason,
+        lastActivityAt: row.last_activity_at,
+        totalBytes: row.total_bytes,
+        ownerLogin: logins.get(row.user_id) ?? null,
+        pinned: row.pinned,
+        filesTouched: row.files_touched ?? [],
+        summarizedAt: row.summarized_at,
+        score: r.score,
+        matchingPassage: r.matchingPassage,
+      };
+      return item;
+    })
+    .filter(
+      (item): item is SessionListItem => item !== null && matchesSessionListFilters(item, filters),
+    );
 }

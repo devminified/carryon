@@ -38,6 +38,7 @@ import {
   buildSessionUrl,
   postToSlackWithRetry as realPostToSlackWithRetry,
 } from "./slack.ts";
+import { embedText as realEmbedText } from "./embed.ts";
 
 const MAX_API_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 500;
@@ -132,6 +133,15 @@ export interface SummarizeDeps {
   // sender below; tests inject a stub to assert on what would have
   // been sent, without ever making a real network call.
   postToSlack?: typeof realPostToSlackWithRetry;
+  // CO-501: same optional-with-a-real-default shape — real callers
+  // fall back to the real gte-small embedder; tests inject a small
+  // deterministic fake instead. Required here, not optional with a
+  // silent no-op default: unlike Slack (truly optional per project),
+  // every session gets embedded, so a test that forgets to pass one
+  // should fail loudly rather than silently calling the real
+  // Supabase.ai global, which is undefined outside the real edge
+  // runtime (see embed.ts's own comment).
+  embedText: typeof realEmbedText;
 }
 
 export type SummarizeOutcome =
@@ -261,7 +271,9 @@ export async function summarizeSession(
     return { status: "skipped", reason: "no_new_chunks" };
   }
 
-  const { text: condensedText, filesTouched } = condenseSession(texts.join(""));
+  const { text: condensedText, turns, filesTouched } = condenseSession(
+    texts.join(""),
+  );
   const systemPrompt = buildSystemPrompt();
   const userPrompt = buildUserPrompt(condensedText, session.summary);
 
@@ -356,11 +368,42 @@ export async function summarizeSession(
     update.title = parsed.title;
   }
 
+  // CO-501: computed BEFORE the sessions write and merged into the
+  // same `update` object — one write, not two — specifically so a
+  // failed embed call can never prevent the summary itself from being
+  // written, and so this doesn't become a second, separate
+  // `sessions.update()` call that would race or overwrite the first
+  // in a caller only tracking "the last patch written." Best-effort:
+  // caught and logged, never thrown — a slow or failed embed must
+  // never turn an otherwise-successful summarization into a failed
+  // one.
+  try {
+    update.embedding = await deps.embedText(
+      [
+        (update.title as string | undefined) ?? session.title ?? "",
+        parsed.summary,
+        (update.files_touched as string[]).join(" "),
+      ].join("\n"),
+    );
+  } catch (e) {
+    console.error(
+      `summarizeSession: session embedding failed for session ${sessionId}`,
+      e instanceof Error ? e.message : String(e),
+    );
+  }
+
   const { error: updateErr } = await deps.adminClient
     .from("sessions")
     .update(update)
     .eq("id", sessionId);
   if (updateErr) throw updateErr;
+
+  // Passages go to their own table (session_passages), so unlike the
+  // session-level embedding above this is a genuinely separate write
+  // — turns are append-only (I2) once Claude Code writes them, so
+  // there's nothing to merge into the sessions update the way the
+  // session-level embedding is. Best-effort, same reasoning.
+  await embedNewPassages(deps, sessionId, turns);
 
   // CO-409: notify Slack only on the transition INTO 'blocked', not
   // on every subsequent sweep call that still finds the session
@@ -381,6 +424,63 @@ export async function summarizeSession(
   }
 
   return { status: "summarized" };
+}
+
+/** CO-501: embeds this run's own new turns and appends them to
+ * session_passages, keyed by a running per-session seq (the existing-
+ * passage count at the start of this call) so incremental runs never
+ * collide with or overwrite an earlier run's passages — turns are
+ * append-only (I2) once Claude Code writes them, unlike the session-
+ * level embedding (which genuinely gets replaced every run, merged
+ * into the main sessions.update() call above instead). Every failure
+ * here is logged and swallowed, same reasoning as notifyBlockedSession
+ * below: a slow or failed embed must never turn a successful
+ * summarization into a failed one. */
+async function embedNewPassages(
+  deps: SummarizeDeps,
+  sessionId: string,
+  turns: string[],
+): Promise<void> {
+  if (turns.length === 0) return;
+  try {
+    const { count, error: countErr } = await deps.adminClient
+      .from("session_passages")
+      .select("*", { count: "exact", head: true })
+      .eq("session_id", sessionId);
+    if (countErr) {
+      console.error(
+        "summarizeSession: passage count lookup failed",
+        countErr.code,
+      );
+      return;
+    }
+
+    let seq = count ?? 0;
+    const rows: {
+      session_id: string;
+      seq: number;
+      text: string;
+      embedding: number[];
+    }[] = [];
+    for (const turn of turns) {
+      const embedding = await deps.embedText(turn);
+      rows.push({ session_id: sessionId, seq: seq++, text: turn, embedding });
+    }
+    const { error: passagesErr } = await deps.adminClient
+      .from("session_passages")
+      .upsert(rows, { onConflict: "session_id,seq" });
+    if (passagesErr) {
+      console.error(
+        "summarizeSession: passage upsert failed",
+        passagesErr.code,
+      );
+    }
+  } catch (e) {
+    console.error(
+      `summarizeSession: passage embedding failed for session ${sessionId}`,
+      e instanceof Error ? e.message : String(e),
+    );
+  }
 }
 
 /** Looks up the project's own Slack config and the session's owner's

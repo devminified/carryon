@@ -83,4 +83,4 @@ export function SubmitButton({ children }: { children: React.ReactNode }) {
 
 ## Custom hooks
 
-Module-scoped hooks live in `src/modules/{module}/hooks/`; cross-cutting ones in `src/shared/hooks/`. A custom hook returns a stable shape, never renders JSX, and does one thing. Common cross-cutting hooks: `useDebounce` (search-as-you-type once CO-501 ships), `useMediaQuery`, `useCurrentUser`.
+Module-scoped hooks live in `src/modules/{module}/hooks/`; cross-cutting ones in `src/shared/hooks/`. A custom hook returns a stable shape, never renders JSX, and does one thing. Common cross-cutting hooks: `useMediaQuery`, `useCurrentUser`. **Not `useDebounce`** — CO-501's search box turned out not to need search-as-you-type (see `data-fetching.md`'s own note), so there's no debounced-input need in the current build plan; add it if a future ticket genuinely introduces one.
