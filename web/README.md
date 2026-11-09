@@ -18,7 +18,11 @@ pnpm lint
 pnpm typecheck
 pnpm test         # vitest — unit tests for pure functions/schemas
 pnpm test:e2e     # playwright — needs local Supabase running; one test (real GitHub OAuth
-                  # redirect) only runs outside CI, see e2e/auth.spec.ts
+                  # redirect) only runs outside CI, see e2e/auth.spec.ts.
+                  # e2e/session-list.spec.ts also needs its own fixture data seeded once:
+                  #   PGPASSWORD=postgres psql postgresql://postgres:postgres@127.0.0.1:54422/postgres \
+                  #     -f e2e/seed.sql
+                  # (not part of supabase/seed.sql — it's 10,050 rows, only web-e2e needs it)
 pnpm build
 ```
 

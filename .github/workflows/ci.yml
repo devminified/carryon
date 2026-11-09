@@ -113,6 +113,10 @@ jobs:
           deno-version: v2.1.4
       - name: start local stack (applies every migration + seed.sql)
         run: supabase start
+      - name: seed CO-402's own test data (10,050 real sessions + a no-access project)
+        run: |
+          PGPASSWORD=postgres psql "postgresql://postgres:postgres@127.0.0.1:54422/postgres" \
+            -v ON_ERROR_STOP=1 -f web/e2e/seed.sql
       - uses: pnpm/action-setup@v4
         with:
           version: 10.17.1
