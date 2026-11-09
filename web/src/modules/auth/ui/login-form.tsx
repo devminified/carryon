@@ -28,7 +28,11 @@ export function LoginForm() {
   }
 
   return (
-    <div className="flex flex-col items-center gap-3">
+    // suppressHydrationWarning — same Bitwarden-extension-injected-
+    // attribute mismatch root.tsx's <body> already documents; this
+    // wrapper is a separate DOM node the extension also tags
+    // (bis_skin_checked), confirmed from the real console error.
+    <div className="flex flex-col items-center gap-3" suppressHydrationWarning>
       <button
         type="button"
         onClick={signInWithGitHub}
