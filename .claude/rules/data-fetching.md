@@ -22,8 +22,11 @@ After a mutation, the Server Action calls `revalidatePath()` — Next.js re-rend
 
 Carryon's web app is mostly a read-only list/viewer (Doc's "Web UI" row: lists sessions, shows one read-only, copies the pull command) — most screens don't need it. Reach for `useQuery`/`useSuspenseQuery` against a Route Handler (`app/api/.../route.ts`), **not** a Server Action, only for a genuine client-side need:
 
-- **A live session's status** — polling whether a `status: 'live'` session has had new activity, so the list updates without a manual refresh.
 - **Search-as-you-type** against the search index (CO-501), once that ships.
+
+**A live session's status is not this** — the ticket's own wording (CO-402) is "Live sessions update through Supabase Realtime," and that's what `modules/sessions/hooks/use-live-sessions.ts` actually does: a real `supabase.channel(...).on('postgres_changes', ...)` subscription (scoped to one project, filtered server-side), not TanStack polling. RLS still gates what a subscriber receives — the migration that adds the table to the `supabase_realtime` publication documents why that's safe.
+
+**Realtime auth gotcha, found the hard way (CO-402):** `createBrowserClient`'s automatic `onAuthStateChange` → `realtime.setAuth(token)` wiring isn't reliably settled by the time a `useEffect` right after mount calls `channel.subscribe()` — the subscription reports `SUBSCRIBED` either way, but every change event is silently dropped (no error, nothing in `realtime.subscription`, nothing in the container logs) if the realtime socket is still authenticated as `anon` when RLS evaluates it. Fix: `await supabase.auth.getSession()` then `await supabase.realtime.setAuth(session.access_token)` **before** calling `.subscribe()`, every time a Postgres Changes subscription is set up. Don't assume the automatic wiring already happened.
 
 ```tsx
 // only once a real polling need exists

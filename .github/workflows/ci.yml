@@ -113,6 +113,10 @@ jobs:
           deno-version: v2.1.4
       - name: start local stack (applies every migration + seed.sql)
         run: supabase start
+      - name: seed CO-402's own test data (10,050 real sessions + a no-access project)
+        run: |
+          PGPASSWORD=postgres psql "postgresql://postgres:postgres@127.0.0.1:54422/postgres" \
+            -v ON_ERROR_STOP=1 -f web/e2e/seed.sql
       - uses: pnpm/action-setup@v4
         with:
           version: 10.17.1
@@ -130,6 +134,11 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54421
           NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
+          # CO-402's modules/sessions/data/queries.ts resolves developer
+          # logins via the admin client (architecture.md's "RLS can't
+          # express this" exception) — needed for real here, not just
+          # for the `web` job's leak check.
+          SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

@@ -45,6 +45,31 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
+  // CO-402: a real 404 for a project the caller can't see has to happen
+  // here, before the page starts streaming — (dashboard)/loading.tsx
+  // means the page's own response already committed its 200 status by
+  // the time its Server Component calls notFound() (Next's own
+  // loading.tsx doc, "Status codes": "Calling notFound() before
+  // streaming starts returns a 404" — after it, the 200 already sent
+  // can't be un-sent). This is the one check that query is cheap enough
+  // to run on every request to this one path shape.
+  const projectMatch = request.nextUrl.pathname.match(
+    /^\/p\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i,
+  );
+  if (data.user && projectMatch) {
+    const { data: project } = await supabase
+      .from('projects')
+      .select('id')
+      .eq('id', projectMatch[1])
+      .maybeSingle();
+    if (!project) {
+      return new NextResponse('This page could not be found.', {
+        status: 404,
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+      });
+    }
+  }
+
   return response;
 }
 

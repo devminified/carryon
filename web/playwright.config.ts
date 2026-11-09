@@ -7,6 +7,12 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  // Every test here shares one real local Supabase instance and one
+  // real Next server process (not mocks) — parallel workers contending
+  // for both caused real, reproducible flakes unrelated to the app
+  // under test (see this PR's description). Fully serial; this suite
+  // is small enough (under a minute total) that the tradeoff is easy.
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: 'list',
