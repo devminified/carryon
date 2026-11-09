@@ -30,6 +30,31 @@ async function resolveLogins(userIds: string[]): Promise<Map<string, string | nu
   return new Map(entries);
 }
 
+// The common row -> SessionListItem mapping, shared by every read path
+// below (plain list, semantic search, file lookup) now that there are
+// three of them — the "wait for the third occurrence" threshold
+// (CLAUDE.md). Callers that have extra fields of their own (search's
+// score/matchingPassage) spread this result and add them on top.
+function rowToListItem(row: SessionRow, ownerLogin: string | null): SessionListItem {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    userId: row.user_id,
+    title: row.title,
+    summary: row.summary,
+    branch: row.branch,
+    status: row.status,
+    outcome: row.outcome,
+    blockedReason: row.blocked_reason,
+    lastActivityAt: row.last_activity_at,
+    totalBytes: row.total_bytes,
+    ownerLogin,
+    pinned: row.pinned,
+    filesTouched: row.files_touched ?? [],
+    summarizedAt: row.summarized_at,
+  };
+}
+
 export async function listDevelopersForProject(projectId: string): Promise<string[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -124,23 +149,7 @@ export async function listSessionsForProject(
 
   const logins = await resolveLogins(page.map((r) => r.user_id));
 
-  const items: SessionListItem[] = page.map((r) => ({
-    id: r.id,
-    projectId: r.project_id,
-    userId: r.user_id,
-    title: r.title,
-    summary: r.summary,
-    branch: r.branch,
-    status: r.status,
-    outcome: r.outcome,
-    blockedReason: r.blocked_reason,
-    lastActivityAt: r.last_activity_at,
-    totalBytes: r.total_bytes,
-    ownerLogin: logins.get(r.user_id) ?? null,
-    pinned: r.pinned,
-    filesTouched: r.files_touched ?? [],
-    summarizedAt: r.summarized_at,
-  }));
+  const items: SessionListItem[] = page.map((r) => rowToListItem(r, logins.get(r.user_id) ?? null));
 
   const last = page[page.length - 1];
   const nextCursor =
@@ -205,21 +214,7 @@ export async function searchSessionsForProject(
       // two calls, not an access decision to make twice.
       if (!row) return null;
       const item: SessionListItem = {
-        id: row.id,
-        projectId: row.project_id,
-        userId: row.user_id,
-        title: row.title,
-        summary: row.summary,
-        branch: row.branch,
-        status: row.status,
-        outcome: row.outcome,
-        blockedReason: row.blocked_reason,
-        lastActivityAt: row.last_activity_at,
-        totalBytes: row.total_bytes,
-        ownerLogin: logins.get(row.user_id) ?? null,
-        pinned: row.pinned,
-        filesTouched: row.files_touched ?? [],
-        summarizedAt: row.summarized_at,
+        ...rowToListItem(row, logins.get(row.user_id) ?? null),
         score: r.score,
         matchingPassage: r.matchingPassage,
       };
@@ -228,4 +223,37 @@ export async function searchSessionsForProject(
     .filter(
       (item): item is SessionListItem => item !== null && matchesSessionListFilters(item, filters),
     );
+}
+
+// CO-502: "who touched this file" — a path relative to the repo root
+// (the exact value summarizeSession's own files_touched normalization
+// produces, see _shared/condense-transcript.ts), matched as a prefix
+// — an exact file path and a bare directory prefix both work with one
+// field, same reasoning as find_sessions_by_file's own migration
+// comment. Calls that SECURITY INVOKER SQL function via this app's
+// own RLS-scoped client, same architecture as searchSessionsForProject
+// above; the other filters apply the same post-fetch way search's own
+// matchesSessionListFilters already does, since the function itself
+// only understands a path and an optional project.
+const FILE_MATCH_COUNT = 50;
+
+export async function findSessionsByFile(
+  projectId: string,
+  filters: SessionListFilters & { file: string },
+): Promise<SessionListItem[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.rpc('find_sessions_by_file', {
+    p_path: filters.file.trim(),
+    p_project_id: projectId,
+    p_limit: FILE_MATCH_COUNT,
+  });
+  if (error) throw error;
+
+  const rows = (data ?? []) as SessionRow[];
+  const logins = await resolveLogins(rows.map((r) => r.user_id));
+
+  return rows
+    .map((r) => rowToListItem(r, logins.get(r.user_id) ?? null))
+    .filter((item) => matchesSessionListFilters(item, filters));
 }

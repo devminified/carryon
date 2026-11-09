@@ -54,6 +54,40 @@ function basename(path: string): string {
   return path.split("/").pop() ?? path;
 }
 
+// CO-502: a tool_use's file_path is whatever absolute path Claude Code
+// saw on the developer's own machine — internal/pull.PathRewriter
+// already has to deal with exactly this when restoring a pull onto a
+// *different* machine, but the server-side need here is simpler: not
+// rewriting to a new root, just stripping the session's own
+// original_cwd prefix so two machines that both ran the same repo from
+// different absolute locations end up with the same files_touched
+// entries ("Paths are normalized relative to the repo root" — this
+// ticket's own testing point). A path outside cwd (rare — a symlink, a
+// global config file) is left as-is; there's nothing else to
+// normalize it against.
+const winDriveRe = /^[A-Za-z]:[\\/]/;
+
+function toForwardSlash(s: string): string {
+  return s.replaceAll("\\", "/");
+}
+
+function normalizeRelativeToCwd(rawPath: string, cwd: string): string {
+  const path = toForwardSlash(rawPath);
+  const root = toForwardSlash(cwd).replace(/\/+$/, "");
+  if (root === "") return path;
+
+  // Windows paths are case-insensitive; POSIX ones are not — folding
+  // case for a POSIX root would introduce false matches of its own
+  // (same reasoning as PathRewriter's own caseInsensitive flag).
+  const caseInsensitive = winDriveRe.test(cwd);
+  const prefix = root + "/";
+  const matches = caseInsensitive
+    ? path.toLowerCase().startsWith(prefix.toLowerCase())
+    : path.startsWith(prefix);
+  if (!matches) return path;
+  return path.slice(prefix.length);
+}
+
 // The tool names whose file_path input counts as a "file touched" —
 // Read/Write/Edit/NotebookEdit all operate on one real file; Grep/Glob
 // take a *pattern*, not a file, so they're deliberately excluded.
@@ -212,7 +246,10 @@ export interface CondenseResult {
  * applyTokenCap on the result's `turns` once every range a session has
  * is assembled, not per range, since the cap is a property of the
  * whole session's output, not of any one incremental slice. */
-export function condenseTranscriptText(text: string): CondenseResult {
+export function condenseTranscriptText(
+  text: string,
+  cwd?: string,
+): CondenseResult {
   const entries = parseTranscript(text);
   const turns = groupIntoTurns(entries);
 
@@ -225,7 +262,9 @@ export function condenseTranscriptText(text: string): CondenseResult {
       if (FILE_TOOLS.has(block.name)) {
         const path = str(block.input.file_path) ??
           str(block.input.notebook_path);
-        if (path) filesTouched.add(path);
+        if (path) {
+          filesTouched.add(cwd ? normalizeRelativeToCwd(path, cwd) : path);
+        }
       } else if (block.name === "Bash") {
         const command = str(block.input.command);
         if (command) commandsRun.add(command);
@@ -300,13 +339,14 @@ export function applyTokenCap(
 export function condenseSession(
   text: string,
   capTokens = DEFAULT_CAP_TOKENS,
+  cwd?: string,
 ): {
   text: string;
   turns: string[];
   filesTouched: string[];
   commandsRun: string[];
 } {
-  const result = condenseTranscriptText(text);
+  const result = condenseTranscriptText(text, cwd);
   return {
     text: applyTokenCap(result.turns, capTokens),
     turns: result.turns,

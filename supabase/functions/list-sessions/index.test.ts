@@ -32,6 +32,18 @@ const LOGIN_BY_USER: Record<string, string> = {
   "u-sara": "sara",
 };
 
+const FILE_SESSION_ROWS = [
+  {
+    id: "33333333-3333-4333-8333-333333333333",
+    project_id: "p1",
+    user_id: "u-ali",
+    branch: "main",
+    title: "fix webhook retry",
+    last_activity_at: "2026-11-06T10:00:00.000Z",
+    status: "live",
+  },
+];
+
 function fakeDeps(opts: {
   user?: unknown;
   // deno-lint-ignore no-explicit-any
@@ -40,6 +52,9 @@ function fakeDeps(opts: {
   sessions?: { data?: any; error?: any };
   // deno-lint-ignore no-explicit-any
   owner?: Record<string, { data?: any; error?: any }>;
+  // deno-lint-ignore no-explicit-any
+  fileRows?: { data?: any; error?: any };
+  onRpcCall?: (fn: string, args: Record<string, unknown>) => void;
 }): Deps {
   // Every select below runs as the caller (CO-302): RLS itself is what
   // would normally restrict "projects"/"sessions" to what this user
@@ -99,6 +114,51 @@ function fakeDeps(opts: {
         return builder;
       }
       throw new Error(`unexpected table ${table}`);
+    },
+    rpc(fn: string, args: Record<string, unknown>) {
+      if (fn !== "find_sessions_by_file") {
+        throw new Error(`unexpected rpc ${fn}`);
+      }
+      opts.onRpcCall?.(fn, args);
+      // deno-lint-ignore no-explicit-any
+      const builder: any = {
+        _status: undefined as string | undefined,
+        _since: undefined as string | undefined,
+        select() {
+          return this;
+        },
+        in() {
+          return this;
+        },
+        order() {
+          return this;
+        },
+        limit() {
+          return this;
+        },
+        eq(_col: string, val: string) {
+          this._status = val;
+          return this;
+        },
+        gte(_col: string, val: string) {
+          this._since = val;
+          return this;
+        },
+        then(resolve: (v: unknown) => unknown) {
+          if (opts.fileRows) {
+            return Promise.resolve(opts.fileRows).then(resolve);
+          }
+          let data = FILE_SESSION_ROWS;
+          if (this._status) {
+            data = data.filter((r) => r.status === this._status);
+          }
+          if (this._since) {
+            data = data.filter((r) => r.last_activity_at >= this._since);
+          }
+          return Promise.resolve({ data, error: null }).then(resolve);
+        },
+      };
+      return builder;
     },
     // deno-lint-ignore no-explicit-any
   } as any;
@@ -234,6 +294,58 @@ Deno.test("--project with no matching accessible project returns an empty list, 
   assertEquals(res.status, 200);
   const body = await res.json();
   assertEquals(body.sessions, []);
+});
+
+Deno.test("--file calls find_sessions_by_file with the given path, newest activity first", async () => {
+  let calledFn = "";
+  // deno-lint-ignore no-explicit-any
+  let calledArgs: any = null;
+  const res = await handle(
+    req({ file: "src/payments/webhook.ts" }),
+    fakeDeps({
+      user: fakeUser(),
+      onRpcCall: (fn, args) => {
+        calledFn = fn;
+        calledArgs = args;
+      },
+    }),
+  );
+  assertEquals(res.status, 200);
+  assertEquals(calledFn, "find_sessions_by_file");
+  assertEquals(calledArgs.p_path, "src/payments/webhook.ts");
+  const body = await res.json();
+  assertEquals(body.sessions.length, 1);
+  assertEquals(body.sessions[0].id, "33333333-3333-4333-8333-333333333333");
+});
+
+Deno.test("--file combines with --status, same as the plain list path", async () => {
+  const res = await handle(
+    req({ file: "src/payments/webhook.ts", status: "ended" }),
+    fakeDeps({ user: fakeUser() }),
+  );
+  const body = await res.json();
+  assertEquals(body.sessions, []);
+});
+
+Deno.test("--file with no matches returns an empty list, not an error", async () => {
+  const res = await handle(
+    req({ file: "src/nowhere.ts" }),
+    fakeDeps({
+      user: fakeUser(),
+      fileRows: { data: [], error: null },
+    }),
+  );
+  assertEquals(res.status, 200);
+  const body = await res.json();
+  assertEquals(body.sessions, []);
+});
+
+Deno.test("rejects an empty --file value", async () => {
+  const res = await handle(
+    req({ file: "" }),
+    fakeDeps({ user: fakeUser() }),
+  );
+  assertEquals(res.status, 400);
 });
 
 Deno.test("filters can combine (status + dev)", async () => {

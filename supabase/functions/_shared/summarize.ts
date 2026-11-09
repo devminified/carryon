@@ -234,7 +234,7 @@ export async function summarizeSession(
   const { data: session, error: sessionErr } = await deps.adminClient
     .from("sessions")
     .select(
-      "id, project_id, user_id, status, title, title_source, summary, outcome, summarized_through_seq, files_touched",
+      "id, project_id, user_id, status, title, title_source, summary, outcome, summarized_through_seq, files_touched, original_cwd",
     )
     .eq("id", sessionId)
     .maybeSingle();
@@ -271,8 +271,13 @@ export async function summarizeSession(
     return { status: "skipped", reason: "no_new_chunks" };
   }
 
+  // CO-502: normalizes files_touched relative to the session's own
+  // original_cwd, so the same repo file matches across every
+  // developer's machine regardless of where they cloned it locally.
   const { text: condensedText, turns, filesTouched } = condenseSession(
     texts.join(""),
+    undefined,
+    session.original_cwd,
   );
   const systemPrompt = buildSystemPrompt();
   const userPrompt = buildUserPrompt(condensedText, session.summary);

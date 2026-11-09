@@ -15,6 +15,7 @@ export function SessionFilters({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const qInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function setParam(key: string, value: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -28,7 +29,33 @@ export function SessionFilters({
   }
 
   function commitSearch() {
-    setParam('q', qInputRef.current?.value.trim() ?? '');
+    const params = new URLSearchParams(searchParams.toString());
+    const value = qInputRef.current?.value.trim() ?? '';
+    if (value) {
+      params.set('q', value);
+      params.delete('file'); // see commitFile's own comment
+    } else {
+      params.delete('q');
+    }
+    params.delete('cursor');
+    router.push(`${pathname}?${params.toString()}`);
+  }
+
+  // CO-502: a file lookup and a semantic search are two different
+  // questions ("who touched this file" vs. "find a session like
+  // this") — committing one clears the other rather than trying to
+  // combine two independent server-side lookups into one result set.
+  function commitFile() {
+    const params = new URLSearchParams(searchParams.toString());
+    const value = fileInputRef.current?.value.trim() ?? '';
+    if (value) {
+      params.set('file', value);
+      params.delete('q');
+    } else {
+      params.delete('file');
+    }
+    params.delete('cursor');
+    router.push(`${pathname}?${params.toString()}`);
   }
 
   return (
@@ -40,6 +67,17 @@ export function SessionFilters({
         defaultValue={searchParams.get('q') ?? ''}
         onKeyDown={(e) => e.key === 'Enter' && commitSearch()}
         onBlur={commitSearch}
+        className="border-border bg-background min-w-48 rounded-md border px-2 py-1 text-sm"
+      />
+
+      <input
+        ref={fileInputRef}
+        type="search"
+        aria-label="Filter by file touched"
+        placeholder="File touched, e.g. src/payments/webhook.ts"
+        defaultValue={searchParams.get('file') ?? ''}
+        onKeyDown={(e) => e.key === 'Enter' && commitFile()}
+        onBlur={commitFile}
         className="border-border bg-background min-w-48 rounded-md border px-2 py-1 text-sm"
       />
 

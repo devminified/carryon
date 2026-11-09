@@ -17,9 +17,9 @@ import (
 // inputs — easier to unit test than reaching back into *cobra.Command
 // for each one.
 type lsFlags struct {
-	project, dev, status, since string
-	limit                       int
-	json                        bool
+	project, dev, status, since, file string
+	limit                             int
+	json                              bool
 }
 
 func newLsCmd() *cobra.Command {
@@ -40,6 +40,7 @@ func newLsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.dev, "dev", "", "filter to one developer by GitHub login")
 	cmd.Flags().StringVar(&f.status, "status", "", "filter by status: live or ended")
 	cmd.Flags().StringVar(&f.since, "since", "", "only sessions active since, e.g. 7d, 24h, 30m")
+	cmd.Flags().StringVar(&f.file, "file", "", "only sessions that touched this file (path relative to the repo root, or a directory prefix)")
 	cmd.Flags().IntVar(&f.limit, "limit", 0, "maximum rows to return (server default: 50)")
 	cmd.Flags().BoolVar(&f.json, "json", false, "print as JSON")
 	return cmd
@@ -52,7 +53,7 @@ func runLs(cmd *cobra.Command, args []string, f lsFlags) error {
 	if f.status != "" && f.status != "live" && f.status != "ended" {
 		return fmt.Errorf("invalid --status %q: want live or ended", f.status)
 	}
-	in := api.ListSessionsInput{Project: f.project, Dev: f.dev, Status: f.status, Limit: f.limit}
+	in := api.ListSessionsInput{Project: f.project, Dev: f.dev, Status: f.status, Limit: f.limit, File: f.file}
 	if f.since != "" {
 		cutoff, err := ls.ParseSince(f.since, time.Now())
 		if err != nil {

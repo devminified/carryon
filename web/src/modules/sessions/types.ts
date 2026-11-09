@@ -48,4 +48,6 @@ export type SessionListFilters = {
   from?: string;
   to?: string;
   q?: string;
+  // CO-502: a path relative to the repo root, or a directory prefix.
+  file?: string;
 };
