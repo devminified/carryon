@@ -9,6 +9,24 @@
 import { ZstdCodec } from 'zstd-codec';
 import { createClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// CO-501: a real gte-small embedding of SUMMARY_SESSION_ID's own
+// title + summary + files_touched (the exact formula summarizeSession
+// uses), computed once via the real local edge runtime and hardcoded
+// here — same spirit as this file's own summary/outcome/filesTouched
+// fixtures already faking the AI step with a realistic, hand-set
+// result instead of a real Anthropic call. There's no production
+// endpoint for embedding arbitrary text outside summarizeSession()
+// itself, so a real one had to be precomputed rather than computed
+// fresh on every seed run. See docs/co-501-embedding-choice.md.
+const SUMMARY_SESSION_EMBEDDING = JSON.parse(
+  readFileSync(join(__dirname, 'co501-summary-session-embedding.json'), 'utf8'),
+);
 
 const SUPABASE_URL = 'http://127.0.0.1:54421';
 const SERVICE_ROLE_KEY =
@@ -363,6 +381,7 @@ async function seedForkSession(
     blockedReason,
     filesTouched,
     summarizedAt,
+    embedding,
   },
 ) {
   const { error } = await admin.from('sessions').upsert({
@@ -381,6 +400,12 @@ async function seedForkSession(
     ...(blockedReason !== undefined ? { blocked_reason: blockedReason } : {}),
     ...(filesTouched !== undefined ? { files_touched: filesTouched } : {}),
     ...(summarizedAt !== undefined ? { summarized_at: summarizedAt } : {}),
+    // CO-501: a plain JS array would get sent as JSON and rejected by
+    // the `vector` column's own input parser — stringify to pgvector's
+    // own "[1,2,3]" text format instead, same encoding a raw REST call
+    // needs (confirmed directly, see docs/co-501-embedding-choice.md's
+    // own benchmark script).
+    ...(embedding !== undefined ? { embedding: `[${embedding.join(',')}]` } : {}),
   });
   if (error) throw new Error(`seedForkSession failed for ${sessionId}: ${error.message}`);
 }
@@ -633,6 +658,11 @@ async function main() {
     outcome: 'done',
     filesTouched: ['/repo/webhook.ts', '/repo/webhook.test.ts'],
     summarizedAt: '2026-06-15T11:55:00Z',
+    // CO-501: backs summary-display-and-rerun.spec.ts's semantic
+    // search case — the only RENAME_PROJECT_B_ID fixture with a real
+    // embedding, so it's the only one search_sessions' own
+    // "embedding is not null" filter can return for that project.
+    embedding: SUMMARY_SESSION_EMBEDDING,
   });
 
   // Same real summary, but in RENAME_PROJECT_A_ID where ali is only a

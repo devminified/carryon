@@ -293,14 +293,23 @@ export function applyTokenCap(
 }
 
 /** One-shot convenience: condense a whole session's chunk text (not
- * incremental) and cap it in the same call. */
+ * incremental) and cap it in the same call. `turns` is the same
+ * uncapped array condenseTranscriptText already built — CO-501's own
+ * passage-embedding step needs per-turn text, not just the capped,
+ * joined `text` every earlier caller of this function wanted. */
 export function condenseSession(
   text: string,
   capTokens = DEFAULT_CAP_TOKENS,
-): { text: string; filesTouched: string[]; commandsRun: string[] } {
+): {
+  text: string;
+  turns: string[];
+  filesTouched: string[];
+  commandsRun: string[];
+} {
   const result = condenseTranscriptText(text);
   return {
     text: applyTokenCap(result.turns, capTokens),
+    turns: result.turns,
     filesTouched: result.filesTouched,
     commandsRun: result.commandsRun,
   };

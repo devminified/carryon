@@ -28,6 +28,10 @@ export type SessionListItem = {
   // CO-408
   filesTouched: string[];
   summarizedAt: string | null;
+  // CO-501: only set when this item came from semantic search
+  // (searchSessionsForProject), never from the plain project list.
+  score?: number;
+  matchingPassage?: string | null;
 };
 
 // pinned leads the sort (pinned desc, last_activity_at desc, id desc,

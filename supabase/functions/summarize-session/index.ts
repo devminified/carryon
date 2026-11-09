@@ -36,6 +36,7 @@ import {
   type SummarizeOutcome,
   summarizeSession,
 } from "../_shared/summarize.ts";
+import { embedText as realEmbedText } from "../_shared/embed.ts";
 
 const BATCH_LIMIT = 200;
 
@@ -102,6 +103,7 @@ export async function handle(
           anthropicApiKey,
           sleep: deps.sleep,
           now: deps.now,
+          embedText: realEmbedText,
         },
         session.id,
       );

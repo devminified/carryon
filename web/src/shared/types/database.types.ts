@@ -348,11 +348,47 @@ export type Database = {
           },
         ]
       }
+      session_passages: {
+        Row: {
+          created_at: string
+          embedding: string
+          id: number
+          seq: number
+          session_id: string
+          text: string
+        }
+        Insert: {
+          created_at?: string
+          embedding: string
+          id?: number
+          seq: number
+          session_id: string
+          text: string
+        }
+        Update: {
+          created_at?: string
+          embedding?: string
+          id?: number
+          seq?: number
+          session_id?: string
+          text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_passages_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sessions: {
         Row: {
           blocked_reason: string | null
           branch: string | null
           claude_code_version: string | null
+          embedding: string | null
           ended_reason: string | null
           files_touched: string[] | null
           head_sha: string | null
@@ -380,6 +416,7 @@ export type Database = {
           blocked_reason?: string | null
           branch?: string | null
           claude_code_version?: string | null
+          embedding?: string | null
           ended_reason?: string | null
           files_touched?: string[] | null
           head_sha?: string | null
@@ -407,6 +444,7 @@ export type Database = {
           blocked_reason?: string | null
           branch?: string | null
           claude_code_version?: string | null
+          embedding?: string | null
           ended_reason?: string | null
           files_touched?: string[] | null
           head_sha?: string | null
@@ -461,6 +499,19 @@ export type Database = {
         Returns: boolean
       }
       is_any_project_admin: { Args: never; Returns: boolean }
+      search_sessions: {
+        Args: {
+          p_match_count?: number
+          p_project_id?: string
+          p_query_embedding: string
+          p_query_text: string
+        }
+        Returns: {
+          matching_passage: string
+          score: number
+          session_id: string
+        }[]
+      }
       storage_object_project_id: {
         Args: { object_name: string }
         Returns: string

@@ -31,6 +31,20 @@ interface FakeOpts {
   notificationSettings?: { slack_webhook_url: string | null } | null;
   ownerLogin?: string | null;
   ownerLookupError?: unknown;
+  // CO-501
+  existingPassageCount?: number;
+  passageCountError?: unknown;
+  passageUpsertError?: unknown;
+  onPassageUpsert?: (rows: Record<string, unknown>[]) => void;
+}
+
+// A tiny, deterministic fake — real dimensionality (384) doesn't
+// matter to anything these tests assert on, only that embedText is
+// callable and returns *something* array-shaped the fake adminClient
+// can round-trip. The real implementation (_shared/embed.ts) is never
+// reachable from deno test at all — see that file's own comment.
+function fakeEmbedText(text: string): Promise<number[]> {
+  return Promise.resolve([text.length]);
 }
 
 async function fakeAdmin(opts: FakeOpts) {
@@ -148,6 +162,24 @@ async function fakeAdmin(opts: FakeOpts) {
           }),
         };
       }
+      if (table === "session_passages") {
+        return {
+          select: () => ({
+            eq: () =>
+              Promise.resolve(
+                opts.passageCountError
+                  ? { count: null, error: opts.passageCountError }
+                  : { count: opts.existingPassageCount ?? 0, error: null },
+              ),
+          }),
+          upsert: (rows: Record<string, unknown>[]) => {
+            opts.onPassageUpsert?.(rows);
+            return Promise.resolve({
+              error: opts.passageUpsertError ?? null,
+            });
+          },
+        };
+      }
       throw new Error(`unexpected table ${table}`);
     },
     storage: {
@@ -219,6 +251,7 @@ async function buildDeps(
     sleep: () => Promise.resolve(),
     now: () => new Date("2026-06-15T12:00:00Z"),
     postToSlack,
+    embedText: fakeEmbedText,
   };
 }
 
@@ -238,6 +271,75 @@ Deno.test("writes title/summary/outcome/files_touched from a valid response", as
   assertEquals(updated?.blocked_reason, null);
   assert((updated?.files_touched as string[]).includes("/repo/webhook.ts"));
   assertEquals(updated?.summarized_at, "2026-06-15T12:00:00.000Z");
+  // CO-501: the session-level embedding is merged into this same
+  // sessions.update() call, not a second write.
+  assert(Array.isArray(updated?.embedding));
+});
+
+function userLineJsonl(uuid: string, text: string): string {
+  return JSON.stringify({
+    type: "user",
+    uuid,
+    message: { role: "user", content: text },
+  }) + "\n";
+}
+
+Deno.test("CO-501: embeds this run's new turns as session_passages, starting after the existing count", async () => {
+  // deno-lint-ignore no-explicit-any
+  let upserted: any = null;
+  const deps = await buildDeps({
+    chunkTexts: [
+      userLineJsonl("u1", "fix the webhook retry bug"),
+      userLineJsonl("u2", "now run the tests"),
+    ],
+    existingPassageCount: 3,
+    onPassageUpsert: (rows) => {
+      upserted = rows;
+    },
+  });
+  const outcome = await summarizeSession(deps, SESSION_ID);
+  assertEquals(outcome, { status: "summarized" });
+  assert(Array.isArray(upserted) && upserted.length > 0);
+  // seq continues from the existing count (3), never restarts at 0 —
+  // an incremental run must never collide with an earlier run's rows.
+  assertEquals(upserted[0].seq, 3);
+  assertEquals(upserted[0].session_id, SESSION_ID);
+  assert(typeof upserted[0].text === "string" && upserted[0].text.length > 0);
+  assert(Array.isArray(upserted[0].embedding));
+});
+
+Deno.test("CO-501: a failed session embedding call never blocks the summary write itself", async () => {
+  // deno-lint-ignore no-explicit-any
+  let updated: any = null;
+  const deps = await buildDeps({
+    chunkTexts: ["line one\n"],
+    onUpdate: (patch) => {
+      updated = patch;
+    },
+  });
+  deps.embedText = () => Promise.reject(new Error("embedding backend down"));
+  const outcome = await summarizeSession(deps, SESSION_ID);
+  assertEquals(outcome, { status: "summarized" });
+  assertEquals(updated?.title, "fix payment retry bug");
+  assertEquals(Object.hasOwn(updated ?? {}, "embedding"), false);
+});
+
+Deno.test("CO-501: a failed passage count lookup is logged and skipped, never fails summarization", async () => {
+  const deps = await buildDeps({
+    chunkTexts: ["line one\n"],
+    passageCountError: { code: "XXXXX" },
+  });
+  const outcome = await summarizeSession(deps, SESSION_ID);
+  assertEquals(outcome, { status: "summarized" });
+});
+
+Deno.test("CO-501: a failed passage upsert is logged and skipped, never fails summarization", async () => {
+  const deps = await buildDeps({
+    chunkTexts: ["line one\n"],
+    passageUpsertError: { code: "XXXXX" },
+  });
+  const outcome = await summarizeSession(deps, SESSION_ID);
+  assertEquals(outcome, { status: "summarized" });
 });
 
 Deno.test("never overwrites a manual title (CO-405's own contract)", async () => {
@@ -490,6 +592,7 @@ Deno.test("an API failure retries with backoff and leaves the old summary in pla
       return Promise.resolve();
     },
     now: () => new Date(),
+    embedText: fakeEmbedText,
   };
   // patch admin.from("sessions").update to detect any write
   const originalFrom = admin.from.bind(admin);
@@ -532,6 +635,7 @@ Deno.test("the daily token budget cap stops calls and skips without writing anyt
     anthropicApiKey: "test-key",
     sleep: () => Promise.resolve(),
     now: () => new Date("2026-06-15T12:00:00Z"),
+    embedText: fakeEmbedText,
   };
   const outcome = await summarizeSession(deps, SESSION_ID);
   assertEquals(outcome, { status: "skipped", reason: "budget_exceeded" });
@@ -691,6 +795,11 @@ Deno.test({
         anthropicApiKey: Deno.env.get("ANTHROPIC_API_KEY")!,
         sleep: () => Promise.resolve(),
         now: () => new Date(),
+        // Still a fake — Supabase.ai (unlike the real Anthropic call
+        // this golden test deliberately opts into) is never available
+        // under deno test at all, real key or not; see embed.ts's own
+        // comment.
+        embedText: fakeEmbedText,
       };
       // deno-lint-ignore no-explicit-any
       let capturedOutcome: any = null;

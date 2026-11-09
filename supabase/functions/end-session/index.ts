@@ -46,6 +46,7 @@ import {
   realSleep,
   summarizeSession as realSummarizeSession,
 } from "../_shared/summarize.ts";
+import { embedText as realEmbedText } from "../_shared/embed.ts";
 
 const Input = z.object({
   sessionId: z.string().uuid(),
@@ -139,6 +140,7 @@ export async function handle(
           anthropicApiKey,
           sleep: realSleep,
           now: realNow,
+          embedText: realEmbedText,
         },
         input.sessionId,
       );
