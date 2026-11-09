@@ -64,6 +64,28 @@ export const FORK_HIDDEN_PROJECT_ID = '66666666-6666-6666-6666-666666666099';
 export const FORK_HIDDEN_SESSION_ID = '88888888-8888-4888-8888-888888888040';
 const SARA_USER_ID = '22222222-2222-2222-2222-222222222222';
 
+// CO-405 (rename and pin) fixtures.
+//
+// Project A: ali is only a 'viewer' there — isolates "ownership alone
+// is enough to rename" (RENAME_OWNED_BY_ALI) from "a mere viewer who
+// isn't the owner can't rename someone else's session"
+// (RENAME_OWNED_BY_SARA). Also holds a pre-pinned session + a newer
+// unpinned one, to prove pinned-first sorting and the pin icon are
+// visible to a non-admin viewer too — pinning itself is admin-only,
+// but *seeing* that something is pinned isn't.
+export const RENAME_PROJECT_A_ID = '66666666-6666-6666-6666-666666666405';
+export const RENAME_OWNED_BY_ALI_ID = '88888888-8888-4888-8888-888888888405';
+export const RENAME_OWNED_BY_SARA_ID = '88888888-8888-4888-8888-888888888406';
+export const PIN_PREPINNED_SESSION_ID = '88888888-8888-4888-8888-888888888407';
+export const PIN_NEWER_UNPINNED_SESSION_ID = '88888888-8888-4888-8888-888888888408';
+
+// Project B: ali is 'admin' there, and doesn't own PIN_ADMIN_TARGET_ID
+// (sara does) — isolates "an admin can rename/pin a session they don't
+// own" from ownership-alone above.
+export const RENAME_PROJECT_B_ID = '66666666-6666-6666-6666-666666666406';
+export const PIN_ADMIN_TARGET_ID = '88888888-8888-4888-8888-888888888409';
+export const PIN_ADMIN_OTHER_ID = '88888888-8888-4888-8888-888888888410';
+
 const PLAIN_LINES = [
   {
     type: 'user',
@@ -317,7 +339,10 @@ async function seedSession(
 // session_id), and the family tree UI renders those fields, not
 // transcript content, so there's nothing for seedSession's Storage/zstd
 // path to add here.
-async function seedForkSession(admin, { sessionId, projectId, userId, title, parentSessionId }) {
+async function seedForkSession(
+  admin,
+  { sessionId, projectId, userId, title, parentSessionId, lastActivityAt, pinned },
+) {
   const { error } = await admin.from('sessions').upsert({
     id: sessionId,
     project_id: projectId,
@@ -327,6 +352,8 @@ async function seedForkSession(admin, { sessionId, projectId, userId, title, par
     title,
     parent_session_id: parentSessionId ?? null,
     total_bytes: 0,
+    ...(lastActivityAt ? { last_activity_at: lastActivityAt } : {}),
+    ...(pinned !== undefined ? { pinned } : {}),
   });
   if (error) throw new Error(`seedForkSession failed for ${sessionId}: ${error.message}`);
 }
@@ -491,6 +518,74 @@ async function main() {
     userId: SARA_USER_ID,
     title: 'a fork ali cannot see',
     parentSessionId: FORK_ROOT_SESSION_ID,
+  });
+
+  // CO-405: rename and pin fixtures — see this file's own doc comment
+  // above for why two separate projects are needed to isolate
+  // ownership-alone rename rights from admin-not-owner rename rights.
+  await admin.from('projects').upsert({
+    id: RENAME_PROJECT_A_ID,
+    name: 'co405-project-a',
+    git_remote: 'github.com/devminified/co405-project-a',
+  });
+  await admin.from('project_members').upsert({
+    project_id: RENAME_PROJECT_A_ID,
+    user_id: ALI_USER_ID,
+    role: 'viewer',
+    source: 'manual',
+  });
+  await seedForkSession(admin, {
+    sessionId: RENAME_OWNED_BY_ALI_ID,
+    projectId: RENAME_PROJECT_A_ID,
+    userId: ALI_USER_ID,
+    title: 'ali owns this, viewer role only',
+  });
+  await seedForkSession(admin, {
+    sessionId: RENAME_OWNED_BY_SARA_ID,
+    projectId: RENAME_PROJECT_A_ID,
+    userId: SARA_USER_ID,
+    title: "sara's session, ali is a mere viewer here",
+  });
+  await seedForkSession(admin, {
+    sessionId: PIN_PREPINNED_SESSION_ID,
+    projectId: RENAME_PROJECT_A_ID,
+    userId: SARA_USER_ID,
+    title: 'pre-pinned session',
+    lastActivityAt: '2026-01-01T00:00:00Z',
+    pinned: true,
+  });
+  await seedForkSession(admin, {
+    sessionId: PIN_NEWER_UNPINNED_SESSION_ID,
+    projectId: RENAME_PROJECT_A_ID,
+    userId: SARA_USER_ID,
+    title: 'newer unpinned session',
+    lastActivityAt: '2026-06-01T00:00:00Z',
+  });
+
+  await admin.from('projects').upsert({
+    id: RENAME_PROJECT_B_ID,
+    name: 'co405-project-b',
+    git_remote: 'github.com/devminified/co405-project-b',
+  });
+  await admin.from('project_members').upsert({
+    project_id: RENAME_PROJECT_B_ID,
+    user_id: ALI_USER_ID,
+    role: 'admin',
+    source: 'manual',
+  });
+  await seedForkSession(admin, {
+    sessionId: PIN_ADMIN_TARGET_ID,
+    projectId: RENAME_PROJECT_B_ID,
+    userId: SARA_USER_ID,
+    title: 'quarterly infra review',
+    lastActivityAt: '2026-01-01T00:00:00Z',
+  });
+  await seedForkSession(admin, {
+    sessionId: PIN_ADMIN_OTHER_ID,
+    projectId: RENAME_PROJECT_B_ID,
+    userId: ALI_USER_ID,
+    title: 'newer unrelated session',
+    lastActivityAt: '2026-06-01T00:00:00Z',
   });
 
   console.log('viewer fixtures seeded');

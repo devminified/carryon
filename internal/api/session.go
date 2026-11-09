@@ -25,6 +25,17 @@ func (c *Client) ConfirmPull(ctx context.Context, accessToken, sessionID string)
 	return c.post(ctx, "confirm-pull", accessToken, body, nil)
 }
 
+// RenameSession calls the rename-session Edge Function (CO-405):
+// `carryon rename <id> "<title>"`. Sets title_source = 'manual'
+// server-side so a later AI re-summary (CO-407) never silently
+// overwrites a developer's own title. Returns an *Error satisfying
+// IsForbidden if the caller is neither the session's owner nor an
+// admin of its project, IsNotFound if sessionID doesn't exist.
+func (c *Client) RenameSession(ctx context.Context, accessToken, sessionID, title string) error {
+	body := map[string]string{"sessionId": sessionID, "title": title}
+	return c.post(ctx, "rename-session", accessToken, body, nil)
+}
+
 // DeleteSession calls the delete-session Edge Function (CO-307):
 // `carryon admin delete <sid> --reason`. reason is mandatory — the
 // server refuses an empty or whitespace-only one (validation_failed,

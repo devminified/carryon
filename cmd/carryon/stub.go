@@ -15,6 +15,3 @@ func notImplementedCmd(use, short string) *cobra.Command {
 	}
 }
 
-func newRenameCmd() *cobra.Command {
-	return notImplementedCmd("rename", "Rename a session (CO-405)")
-}

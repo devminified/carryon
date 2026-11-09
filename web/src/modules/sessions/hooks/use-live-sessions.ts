@@ -21,6 +21,7 @@ function toListItem(row: SessionRow, ownerLogin: string | null): SessionListItem
   return {
     id: row.id,
     projectId: row.project_id,
+    userId: row.user_id,
     title: row.title,
     summary: row.summary,
     branch: row.branch,
@@ -29,7 +30,20 @@ function toListItem(row: SessionRow, ownerLogin: string | null): SessionListItem
     lastActivityAt: row.last_activity_at,
     totalBytes: row.total_bytes,
     ownerLogin,
+    pinned: row.pinned,
   };
+}
+
+// Same sort as listSessionsForProject's own ORDER BY (pinned desc,
+// last_activity_at desc) — a realtime pin/unpin toggle (or any
+// last_activity_at bump) must re-sort in place, not just patch the row
+// where it already sits, or a newly-pinned row would stay wherever it
+// happened to be instead of jumping to the top.
+export function sortItems(items: SessionListItem[]): SessionListItem[] {
+  return [...items].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return b.lastActivityAt.localeCompare(a.lastActivityAt);
+  });
 }
 
 // Subscribes to Supabase Realtime for one project's sessions (CO-402).
@@ -105,12 +119,12 @@ export function useLiveSessions(
               }
               const next = [...current];
               next[existingIndex] = toListItem(row, next[existingIndex].ownerLogin);
-              setItems(next);
+              setItems(sortItems(next));
               return;
             }
 
             if (isFirstPage && rowMatchesFilters(row, filters)) {
-              setItems([toListItem(row, null), ...current]);
+              setItems(sortItems([toListItem(row, null), ...current]));
             }
           },
         )

@@ -88,6 +88,59 @@ func TestConfirmPullForbidden(t *testing.T) {
 	}
 }
 
+func TestRenameSessionSuccess(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "anon-key")
+	err := c.RenameSession(context.Background(), "access-token", "s1", "fix payments retry")
+	if err != nil {
+		t.Fatalf("RenameSession() error = %v", err)
+	}
+
+	if gotPath != "/functions/v1/rename-session" {
+		t.Errorf("path = %q, want /functions/v1/rename-session", gotPath)
+	}
+	if gotBody["sessionId"] != "s1" || gotBody["title"] != "fix payments retry" {
+		t.Errorf("request body = %+v", gotBody)
+	}
+}
+
+func TestRenameSessionForbidden(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(errorResponse{Error: "forbidden"})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "anon-key")
+	err := c.RenameSession(context.Background(), "access-token", "s1", "new title")
+	if !IsForbidden(err) {
+		t.Errorf("IsForbidden(err) = false for %v, want true", err)
+	}
+}
+
+func TestRenameSessionNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(errorResponse{Error: "not_found"})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "anon-key")
+	err := c.RenameSession(context.Background(), "access-token", "missing", "new title")
+	if !IsNotFound(err) {
+		t.Errorf("IsNotFound(err) = false for %v, want true", err)
+	}
+}
+
 func TestDeleteSessionSuccess(t *testing.T) {
 	var gotPath string
 	var gotBody map[string]any

@@ -4,7 +4,7 @@ Capture every Claude Code session on a registered repo, upload it (redacted) to 
 
 See `Overview.md` for the product pitch and 52-ticket build plan, `Devminified Carryon — System Design Document (SDD).md` for the architecture and invariants, and `Carryon-TRD-Tickets.md` for the full ticket descriptions. `CLAUDE.md` and `.claude/rules/` are the binding engineering conventions for this repo.
 
-**Current status:** Phases 1–3 are complete, through `CO-308` — capture, upload, pull/resume, roles and row-level security, redaction (laptop-side plus a nightly server-side rescan backstop), the audit log, retention/deletion, GitHub-team-mirrored project roles, and fleet packaging with a signed daily auto-update channel. `carryon rename` (Phase 4, `CO-405`) is the one command still a stub, printing `not implemented` and exiting `2`. Phase 4 (the web app) is underway next.
+**Current status:** Phases 1–3 are complete, through `CO-308` — capture, upload, pull/resume, roles and row-level security, redaction (laptop-side plus a nightly server-side rescan backstop), the audit log, retention/deletion, GitHub-team-mirrored project roles, and fleet packaging with a signed daily auto-update channel. Phase 4 (the web app) is underway: GitHub sign-in, the project/session list, the real session viewer (chat, tool calls, diffs, redaction highlighting), the fork family tree, and rename/pin (`CO-401`–`CO-405`) are done; admin pages (`CO-410`) are next.
 
 ## Install
 
@@ -113,7 +113,7 @@ Requires Go 1.23+.
 | `carryon pull` | implemented | CO-211 |
 | `carryon export` | implemented | CO-211 |
 | `carryon admin delete` | implemented | CO-307 |
-| `carryon rename` | not implemented | CO-405 |
+| `carryon rename` | implemented | CO-405 |
 
 Roles (`viewer` / `resumer` / `admin`) are per-project, enforced by Postgres row-level security, and mirrored from GitHub team membership every 15 minutes (`sync-github-teams`) — see `.claude/rules/auth.md`. Session content is redacted on the laptop before it ever leaves (`internal/redact`), with a nightly server-side rescan as a backstop; every pull, delete, and role-relevant action is recorded in an append-only audit log. See `.claude/rules/redaction.md` and `.claude/rules/database-rls.md` for details.
 

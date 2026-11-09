@@ -15,16 +15,17 @@ import type {
   SessionStatus,
 } from '@/modules/sessions/types';
 import { SESSION_OUTCOMES, SESSION_STATUSES } from '@/modules/sessions/types';
+import { getCurrentRole } from '@/shared/lib/auth';
 
 function decodeCursor(raw: string | undefined): SessionListCursor | undefined {
   if (!raw) return undefined;
-  const [lastActivityAt, id] = raw.split('|');
-  if (!lastActivityAt || !id) return undefined;
-  return { lastActivityAt, id };
+  const [pinned, lastActivityAt, id] = raw.split('|');
+  if (!pinned || !lastActivityAt || !id) return undefined;
+  return { pinned: pinned === '1', lastActivityAt, id };
 }
 
 function encodeCursor(cursor: SessionListCursor): string {
-  return `${cursor.lastActivityAt}|${cursor.id}`;
+  return `${cursor.pinned ? '1' : '0'}|${cursor.lastActivityAt}|${cursor.id}`;
 }
 
 export default async function ProjectPage({
@@ -54,11 +55,13 @@ export default async function ProjectPage({
   };
   const cursor = decodeCursor(sp.cursor);
 
-  const [{ items, nextCursor }, developers, branches] = await Promise.all([
+  const [{ items, nextCursor }, developers, branches, role] = await Promise.all([
     listSessionsForProject(projectId, filters, cursor),
     listDevelopersForProject(projectId),
     listBranchesForProject(projectId),
+    getCurrentRole(projectId),
   ]);
+  const isAdmin = role === 'admin';
 
   const nextParams = new URLSearchParams(
     Object.entries({ ...sp }).filter(([k, v]) => v && k !== 'cursor') as [string, string][],
@@ -74,6 +77,7 @@ export default async function ProjectPage({
         initialItems={items}
         filters={filters}
         isFirstPage={!cursor}
+        isAdmin={isAdmin}
       />
       {nextCursor && (
         <Link

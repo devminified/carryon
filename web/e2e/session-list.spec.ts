@@ -38,7 +38,9 @@ test.describe.serial('session list (CO-402)', () => {
 
     await page.getByRole('combobox', { name: 'Filter by branch' }).selectOption('main');
     await expect(page).toHaveURL(/branch=main/);
-    const branchCells = page.locator('tbody tr td:nth-child(3)');
+    // CO-405 added a leading pin-icon column — Session/Developer/Branch
+    // are now columns 2/3/4, not 1/2/3.
+    const branchCells = page.locator('tbody tr td:nth-child(4)');
     await expect(branchCells.first()).toHaveText('main');
     const count = await branchCells.count();
     for (let i = 0; i < count; i++) {
@@ -50,10 +52,10 @@ test.describe.serial('session list (CO-402)', () => {
     await signInAsSeedUser(context, 'ali@devminified.com', 'password123');
     await page.goto(`/p/${PERF_PROJECT_ID}`);
 
-    const firstPageTitles = await page.locator('tbody tr td:first-child a').allTextContents();
+    const firstPageTitles = await page.locator('tbody tr td:nth-child(2) a').allTextContents();
     await page.getByRole('link', { name: 'Load more' }).click();
     await expect(page).toHaveURL(/cursor=/);
-    const secondPageTitles = await page.locator('tbody tr td:first-child a').allTextContents();
+    const secondPageTitles = await page.locator('tbody tr td:nth-child(2) a').allTextContents();
 
     expect(firstPageTitles.length).toBeGreaterThan(0);
     expect(secondPageTitles.length).toBeGreaterThan(0);
@@ -99,7 +101,8 @@ test.describe.serial('session list (CO-402)', () => {
     await page.goto(`/p/${PERF_PROJECT_ID}?branch=realtime-test`);
 
     const row = page.locator('tbody tr').filter({ hasText: 'realtime test fixture session' });
-    const before = await row.locator('td:nth-child(6)').textContent();
+    // CO-405's leading pin column shifts "Last activity" from 6 to 7.
+    const before = await row.locator('td:nth-child(7)').textContent();
 
     // Real confirm-chunk-style activity bump, via the real PostgREST API —
     // not a UI action, so this proves the Realtime wire-up, not a refetch
@@ -117,12 +120,12 @@ test.describe.serial('session list (CO-402)', () => {
     expect(patchRes.ok).toBe(true);
 
     await expect(async () => {
-      const after = await row.locator('td:nth-child(6)').textContent();
+      const after = await row.locator('td:nth-child(7)').textContent();
       expect(after).not.toBe(before);
     }).toPass({ timeout: 5000 });
 
     // same row, not a reload-and-happen-to-match — title still present
-    await expect(row.locator('td:first-child a')).toHaveText('realtime test fixture session');
+    await expect(row.locator('td:nth-child(2) a')).toHaveText('realtime test fixture session');
 
     await fetch(`${SUPABASE_URL}/rest/v1/sessions?id=eq.${sessionId}`, {
       method: 'DELETE',

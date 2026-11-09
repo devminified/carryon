@@ -68,17 +68,21 @@ select results_eq(
   $$values (null::text)$$, 'but the viewer''s update affected zero rows — title is still unset'
 );
 
--- An admin (not the owner) cannot update it either — only the owner can.
+-- CO-405: an admin (not the owner) CAN update it — rename/pin are an
+-- admin's rights too (admins_can_update_sessions), on top of the
+-- owner-only policy above. Row-level, not column-level (RLS has no
+-- such primitive — see that migration's own comment): this proves the
+-- same thing the real rename/pin paths rely on.
 reset role;
 set local role authenticated;
 set local request.jwt.claim.sub = 'a2222222-2222-2222-2222-222222222203';
 select lives_ok(
-  $$update sessions set title = 'hijacked-by-admin' where id = 'a2222222-2222-2222-2222-22222222220b'$$,
+  $$update sessions set title = 'renamed-by-admin' where id = 'a2222222-2222-2222-2222-22222222220b'$$,
   'an admin''s update (not the owner) runs without erroring'
 );
 select results_eq(
   $$select title from sessions where id = 'a2222222-2222-2222-2222-22222222220b'$$,
-  $$values (null::text)$$, 'but the admin''s update also affected zero rows'
+  $$values ('renamed-by-admin'::text)$$, 'and the admin''s update actually took effect'
 );
 
 -- The owner can update their own session.

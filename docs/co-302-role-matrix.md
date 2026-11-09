@@ -12,6 +12,11 @@ was built; it isn't itself the sign-off.**
 > row below (still showing CO-302's original "deliberately deferred"
 > state) is now historical — see `.claude/rules/database-rls.md`'s RLS
 > section for the real, current policy.
+>
+> **Also superseded in part by CO-405** ("Rename and pin"), which added
+> `admins_can_update_sessions` — the `sessions` (update) row below is
+> updated in place to reflect it, rather than left historical, since
+> it's a one-cell change to an otherwise-still-accurate table.
 
 Three roles per project, in ascending order: `viewer < resumer < admin`.
 "Owner" means `sessions.user_id = auth.uid()` — a developer can always
@@ -26,7 +31,7 @@ read and manage their own sessions regardless of their project role
 | `project_members` (insert/update/delete) | ❌ | ❌ | ✅ | ❌ | n/a |
 | `sessions` (select) | ✅ | ✅ | ✅ | ❌ | ✅ (always, even below viewer on the project — there's no such state, but the policy is `OR`, not `AND`) |
 | `sessions` (insert) | ❌ (unless also the owner) | ❌ (unless also the owner) | ❌ (unless also the owner) | ❌ | ✅ (for themselves only) |
-| `sessions` (update) | ❌ (unless also the owner) | ❌ (unless also the owner) | ❌ (unless also the owner) | ❌ | ✅ (their own session only) |
+| `sessions` (update) | ❌ (unless also the owner) | ❌ (unless also the owner) | ✅ (CO-405: `admins_can_update_sessions` — rename/pin any session in their project, row-level not column-level) | ❌ | ✅ (their own session only) |
 | `sessions` (delete) | ❌ | ❌ | ✅ | ❌ | ❌ (not even the owner — delete is admin-only) |
 | `session_chunks` (select) | ❌ | ✅ | ✅ | ❌ | n/a |
 | `session_chunks` (insert) | ❌ | ❌ (unless also the owner) | ❌ (unless also the owner) | ❌ | ✅ (their own session only) |
