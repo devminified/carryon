@@ -13,11 +13,14 @@ var allSubcommands = []string{
 
 // login, logout (CO-103), hook (CO-105), install/uninstall (CO-106),
 // status/logs (CO-113), ls (CO-204), pull/export (CO-211), and rename
-// (CO-405) are implemented; agent (CO-107) is a special case — not a
-// notImplementedCmd stub (see agent.go) because CO-106 installs and
-// starts it as a real OS service, so it can't exit immediately. No
-// subcommand is currently a stub — TestExitCodeForErr below covers
-// errNotImplemented's mapping to exit code 2 directly instead.
+// (CO-405, the last ticket with a stub — stub.go and its
+// notImplementedCmd helper were removed with it, golangci-lint's
+// unused check having nothing left to scaffold for) are implemented;
+// agent (CO-107) is a special case — it was never a stub, since
+// CO-106 installs and starts it as a real OS service, so it can't
+// exit immediately. No subcommand is currently a stub —
+// TestExitCodeForErr below covers errNotImplemented's mapping to exit
+// code 2 directly instead.
 var stubSubcommands = []string{}
 
 func TestRootCommandListsAllSubcommands(t *testing.T) {
