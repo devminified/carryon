@@ -34,6 +34,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_heartbeats: {
+        Row: {
+          blocked_sessions: number
+          hostname: string
+          last_seen_at: string
+          machine_id: string
+          user_id: string
+          version: string
+        }
+        Insert: {
+          blocked_sessions?: number
+          hostname: string
+          last_seen_at?: string
+          machine_id: string
+          user_id: string
+          version: string
+        }
+        Update: {
+          blocked_sessions?: number
+          hostname?: string
+          last_seen_at?: string
+          machine_id?: string
+          user_id?: string
+          version?: string
+        }
+        Relationships: []
+      }
       ai_usage: {
         Row: {
           cost_usd: number
@@ -433,6 +460,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_any_project_admin: { Args: never; Returns: boolean }
       storage_object_project_id: {
         Args: { object_name: string }
         Returns: string

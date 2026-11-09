@@ -83,6 +83,22 @@ export async function proxy(request: NextRequest) {
     if (!session) return notFoundResponse();
   }
 
+  // CO-410: same reasoning as the two checks above, same reason a
+  // page-level notFound() alone isn't enough — every /admin page (and
+  // the audit CSV export route) re-checks requireGlobalAdmin() itself
+  // too (defence in depth, auth.md), but only this middleware check
+  // can actually make the HTTP status a real 404 rather than a 200
+  // with 404-looking content.
+  if (data.user && request.nextUrl.pathname.startsWith('/admin')) {
+    const { data: adminRows } = await supabase
+      .from('project_members')
+      .select('project_id')
+      .eq('user_id', data.user.id)
+      .eq('role', 'admin')
+      .limit(1);
+    if (!adminRows || adminRows.length === 0) return notFoundResponse();
+  }
+
   return response;
 }
 

@@ -4,6 +4,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -30,6 +32,17 @@ type Config struct {
 	// local path. Omitted entirely from a fresh config.toml until the
 	// first pull actually needs it.
 	Repos map[string]string `toml:"repos,omitempty"`
+
+	// MachineID (CO-410) identifies this laptop install, stable across
+	// restarts, for the agent's own heartbeat (internal/api.Client.
+	// Heartbeat) — distinct from the signed-in user, since one
+	// developer can run the agent on more than one machine and the
+	// admin "Agents" page lists per-machine, not per-developer, rows.
+	// Generated once, lazily, by Load() below the first time it's
+	// empty; never derived from hostname/MAC (both can collide or
+	// change across a reinstall) and never sent anywhere but this
+	// laptop's own heartbeat calls.
+	MachineID string `toml:"machine_id,omitempty"`
 }
 
 // Dir returns ~/.carryon, creating it with mode 0700 if it doesn't exist.
@@ -74,7 +87,26 @@ func Load() (*Config, error) {
 	if cfg.AnonKey == "" {
 		return nil, fmt.Errorf("%s: anon_key is required", p)
 	}
+
+	if cfg.MachineID == "" {
+		id, err := generateMachineID()
+		if err != nil {
+			return nil, fmt.Errorf("generating machine id: %w", err)
+		}
+		cfg.MachineID = id
+		if err := Save(&cfg); err != nil {
+			return nil, fmt.Errorf("persisting generated machine id: %w", err)
+		}
+	}
 	return &cfg, nil
+}
+
+func generateMachineID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("reading random bytes: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // Save writes cfg to ~/.carryon/config.toml, mode 0600 (it's not secret,

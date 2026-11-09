@@ -78,6 +78,46 @@ func TestLoadRejectsMissingFields(t *testing.T) {
 	}
 }
 
+func TestLoadGeneratesAndPersistsAMachineIDWhenMissing(t *testing.T) {
+	withFakeHome(t)
+	if err := Save(&Config{APIURL: "http://127.0.0.1:54421", AnonKey: "sb_publishable_test"}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.MachineID == "" {
+		t.Fatal("Load() left MachineID empty")
+	}
+
+	// Persisted, not just set in memory — a second Load() (simulating
+	// the next `carryon agent` run) must see the exact same ID.
+	again, err := Load()
+	if err != nil {
+		t.Fatalf("second Load() error = %v", err)
+	}
+	if again.MachineID != got.MachineID {
+		t.Errorf("second Load().MachineID = %q, want %q (stable across restarts)", again.MachineID, got.MachineID)
+	}
+}
+
+func TestLoadNeverRegeneratesAnExistingMachineID(t *testing.T) {
+	withFakeHome(t)
+	if err := Save(&Config{APIURL: "http://127.0.0.1:54421", AnonKey: "sb_publishable_test", MachineID: "existing-id"}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.MachineID != "existing-id" {
+		t.Errorf("Load().MachineID = %q, want the already-saved %q", got.MachineID, "existing-id")
+	}
+}
+
 func TestSaveWritesPrivateFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX permission bits don't apply on Windows")
