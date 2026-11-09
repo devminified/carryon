@@ -46,6 +46,14 @@ Leaving the GitHub team removes access on the next sync — don't add a separate
 
 `project_members.source` (CO-303) distinguishes a GitHub-derived row (`'sync'`) from an admin's own direct action (`'manual'`) — `sync-github-teams` only ever writes or removes `'sync'` rows, so a manual override always survives the next sync. If a project has none of `team_viewer`/`team_resumer`/`team_admin` set, the sync job skips it entirely (membership stays 100% manual, same as before this ticket) — setting at least one team column is what opts a project into GitHub-driven membership at all.
 
+## Global admin — the `/admin` console (CO-410)
+
+There is no separate global-admin role or table. "Global admin" means **admin of at least one project** (`is_any_project_admin()`, `database-rls.md`) — matching CLAUDE.md's "project/CTO admins doing access review": in practice every project admin is Devminified staff running the whole client fleet, not an untrusted multi-tenant customer. Any authenticated user can also become a *brand-new* project's first admin by registering it (`register-project`, CO-104 — deliberately has no admin check at all, since there's no existing project to check a role against yet); what a non-admin can't do is see or manage the *existing* fleet.
+
+Once inside, every `/admin` page reads and writes **every** project's data, not just ones the signed-in admin happens to be a direct member of — via the service-role client (`createAdminClient()`), after `requireGlobalAdmin()` (below) has already run. This is architecture.md's case (b) widened on purpose: per-project RLS (`has_role()`) has no way to express "an admin of project A may also manage project B," and that's exactly what the admin console needs. See `supabase/migrations/20261109040000_add_admin_pages.sql`'s own comment for the full reasoning.
+
+**The 404 gotcha, found the hard way (CO-410):** calling `notFound()` from inside a Server Component — a page, or a layout wrapping one — renders the real not-found UI, but once this app's `(dashboard)/loading.tsx` lets the response start streaming, the HTTP status has already committed to 200 and can't be changed afterward (same root cause CO-402/CO-403's own `proxy.ts` comment already documented for `/p/[project]` and `/sessions/[id]`, rediscovered independently for `/admin`). **The real 404 status for `/admin/*` comes from `proxy.ts`**, which checks `is_any_project_admin()`-equivalent itself and returns a raw 404 `NextResponse` before the page ever renders. Every `/admin` page's own `requireGlobalAdmin()` call is still real, necessary defence in depth (and the actual authorization boundary for a direct Server Action call, which proxy.ts doesn't intercept) — it just can't be the thing that makes the HTTP status code correct. Any *new* route that needs a genuine 404 (not just 404-looking content) must add its own check to `proxy.ts`, the same way.
+
 ## Reading the current user / role
 
 Always use the helper, never call Supabase directly in app code:
@@ -65,6 +73,8 @@ export async function deleteSession(sessionId: string) {
 ```
 
 Application-layer checks (`requireRole`, hiding a "Delete" button) are a UX optimization and a defence-in-depth check, never the actual security boundary — that's `has_role()` in RLS (`database-rls.md`). A Server Action without a matching RLS policy is a bug, not a convenience.
+
+`isGlobalAdmin()`/`requireGlobalAdmin()` are the same pattern for the global-admin question above — `isGlobalAdmin()` for a UI decision (hide/show the "Admin" nav link), `requireGlobalAdmin()` at the top of every `/admin` page and the audit CSV export route for the real authorization check. Unlike `requireRole`'s `redirect('/')`, this one calls `notFound()` (this ticket's own "non-admins get a 404" testing point) — but see the `proxy.ts` gotcha above for why that alone isn't the thing that makes the *status code* a real 404.
 
 ## `internal/auth` package shape
 

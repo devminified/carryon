@@ -317,10 +317,11 @@ func (p *agentProgram) Start(kservice.Service) error {
 		SkippedPath:  filepath.Join(carryonDir, "skipped-repos.json"),
 	})
 
+	statusPath := filepath.Join(carryonDir, "agent-status.json")
 	a, err := agent.New(agent.Config{
 		QueuePath:  filepath.Join(carryonDir, "queue.jsonl"),
 		CursorPath: filepath.Join(carryonDir, "agent-cursor.json"),
-		StatusPath: filepath.Join(carryonDir, "agent-status.json"),
+		StatusPath: statusPath,
 		Version:    version,
 		Uploader:   uploader,
 	})
@@ -329,7 +330,8 @@ func (p *agentProgram) Start(kservice.Service) error {
 	}
 
 	go func() { p.done <- a.Run(ctx) }()
-	go runUpdateLoop(ctx, lazy) // CO-308: daily self-update check, fire-and-forget — see its own doc comment
+	go runUpdateLoop(ctx, lazy)                // CO-308: daily self-update check, fire-and-forget — see its own doc comment
+	go runHeartbeatLoop(ctx, lazy, statusPath) // CO-410: admin "Agents" page check-in, fire-and-forget — see its own doc comment
 	return nil
 }
 
