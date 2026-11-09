@@ -12,10 +12,13 @@ function item(id: string, pinned: boolean, lastActivityAt: string): SessionListI
     branch: null,
     status: 'ended',
     outcome: null,
+    blockedReason: null,
     lastActivityAt,
     totalBytes: 0,
     ownerLogin: null,
     pinned,
+    filesTouched: [],
+    summarizedAt: null,
   };
 }
 

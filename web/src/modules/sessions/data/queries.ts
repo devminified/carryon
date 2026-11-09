@@ -132,10 +132,13 @@ export async function listSessionsForProject(
     branch: r.branch,
     status: r.status,
     outcome: r.outcome,
+    blockedReason: r.blocked_reason,
     lastActivityAt: r.last_activity_at,
     totalBytes: r.total_bytes,
     ownerLogin: logins.get(r.user_id) ?? null,
     pinned: r.pinned,
+    filesTouched: r.files_touched ?? [],
+    summarizedAt: r.summarized_at,
   }));
 
   const last = page[page.length - 1];

@@ -329,6 +329,10 @@ export async function summarizeSession(
       ]),
     ].sort(),
     summarized_through_seq: lastSeq,
+    // CO-408: the web app's "AI-generated, <relative time>" badge
+    // reads this — distinct from summarized_through_seq (chunk/byte
+    // progress, not a human-readable moment).
+    summarized_at: deps.now().toISOString(),
   };
   // CO-405's own contract: a manual rename is never overwritten by
   // this job. title_source itself is left untouched either way — a

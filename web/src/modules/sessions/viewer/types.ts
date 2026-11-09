@@ -9,8 +9,13 @@ export type SessionTranscriptMeta = {
   branch: string | null;
   status: string;
   outcome: string | null;
+  blockedReason: string | null;
   title: string | null;
   summary: string | null;
+  // CO-408: when summarize-session last wrote a real summary — null
+  // means never summarized yet. Drives the "AI-generated, <relative
+  // time>" badge.
+  summarizedAt: string | null;
   filesTouched: string[];
   parentSessionId: string | null;
   totalBytes: number;

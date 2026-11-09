@@ -2,7 +2,8 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/shared/lib/supabase/server';
-import { pinSessionSchema, renameSessionSchema } from '../schemas';
+import { callEdgeFunction, EdgeFunctionError } from '@/shared/lib/edge-function';
+import { pinSessionSchema, renameSessionSchema, resummarizeSessionSchema } from '../schemas';
 
 // CO-405: the web app's own rename path — bound to a <form action>/
 // useActionState in rename-control.tsx, not the rename-session Edge
@@ -76,5 +77,59 @@ export async function pinSessionAction(
   if (typeof projectId === 'string' && projectId) {
     revalidatePath(`/p/${projectId}`);
   }
+  return null;
+}
+
+// CO-408: unlike rename/pin, this genuinely needs the resummarize-
+// session Edge Function (service-role chunk reads + a real Anthropic
+// call) — there's no RLS-expressible direct write to fall back on.
+// That function does the real admin check and the real once-per-
+// minute-per-session rate limit; this action is a thin, server-side
+// pass-through (callEdgeFunction already runs server-only, with the
+// caller's own session — see that helper's own doc comment) plus
+// error-shape translation for the UI.
+export type ResummarizeSessionActionState =
+  | { error?: string; retryAfterSeconds?: number }
+  | null;
+
+export async function resummarizeSessionAction(
+  _prevState: ResummarizeSessionActionState,
+  formData: FormData,
+): Promise<ResummarizeSessionActionState> {
+  const parsed = resummarizeSessionSchema.safeParse({
+    sessionId: formData.get('sessionId'),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid input' };
+  }
+
+  const projectId = formData.get('projectId');
+
+  try {
+    await callEdgeFunction('resummarize-session', { sessionId: parsed.data.sessionId });
+  } catch (err) {
+    if (err instanceof EdgeFunctionError && err.status === 429) {
+      let retryAfterSeconds: number | undefined;
+      try {
+        retryAfterSeconds = JSON.parse(err.body).retryAfterSeconds;
+      } catch {
+        // body wasn't the expected shape — still a real rate limit,
+        // just without a precise countdown to show.
+      }
+      return {
+        error: 'Already re-summarizing — try again in a minute.',
+        retryAfterSeconds,
+      };
+    }
+    if (err instanceof EdgeFunctionError && err.status === 403) {
+      return { error: 'Only a project admin can re-summarize a session.' };
+    }
+    return { error: err instanceof Error ? err.message : 'Failed to re-summarize.' };
+  }
+
+  if (typeof projectId === 'string' && projectId) {
+    revalidatePath(`/p/${projectId}`);
+  }
+  revalidatePath(`/sessions/${parsed.data.sessionId}`);
   return null;
 }

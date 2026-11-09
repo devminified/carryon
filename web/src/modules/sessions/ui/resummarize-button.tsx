@@ -1,0 +1,43 @@
+'use client';
+
+import { useActionState } from 'react';
+import { resummarizeSessionAction } from '../data/actions';
+
+// CO-408: admin-only "Re-summarize" for the session list — same
+// visibility reasoning as PinButton (RLS/the Edge Function's own
+// admin check is the real enforcement, not this component). Shows
+// "Summarizing…" for the duration of *this admin's own* click — there
+// is no session-wide "a job is running" flag (no speculative scale:
+// the ticket's own testing points only ask that the UI update live
+// once the job writes a new summary, and that re-summarize itself is
+// rate-limited — not that every viewer sees every in-flight run), so
+// another viewer looking at the same row only sees the result once
+// Realtime delivers it, same as any other session update.
+export function ResummarizeButton({
+  sessionId,
+  projectId,
+}: {
+  sessionId: string;
+  projectId: string;
+}) {
+  const [state, action, isPending] = useActionState(resummarizeSessionAction, null);
+
+  return (
+    <form action={action}>
+      <input type="hidden" name="sessionId" value={sessionId} />
+      <input type="hidden" name="projectId" value={projectId} />
+      <button
+        type="submit"
+        disabled={isPending}
+        title={
+          state?.error ??
+          (isPending ? 'Summarizing…' : 'Ask the AI to re-summarize this session')
+        }
+        className="text-muted-foreground hover:text-foreground text-xs underline disabled:opacity-50"
+      >
+        {isPending ? 'Summarizing…' : 'Re-summarize'}
+      </button>
+      {state?.error && <p className="text-destructive text-xs">{state.error}</p>}
+    </form>
+  );
+}

@@ -27,10 +27,13 @@ function toListItem(row: SessionRow, ownerLogin: string | null): SessionListItem
     branch: row.branch,
     status: row.status,
     outcome: row.outcome,
+    blockedReason: row.blocked_reason,
     lastActivityAt: row.last_activity_at,
     totalBytes: row.total_bytes,
     ownerLogin,
     pinned: row.pinned,
+    filesTouched: row.files_touched ?? [],
+    summarizedAt: row.summarized_at,
   };
 }
 
