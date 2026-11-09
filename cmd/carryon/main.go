@@ -49,6 +49,14 @@ func run() int {
 		return 0
 	}
 	fmt.Fprintln(os.Stderr, "carryon:", err)
+	return exitCodeForErr(err)
+}
+
+// exitCodeForErr maps a non-nil root-command error to its exit code —
+// split out from run() so the mapping itself (in particular,
+// errNotImplemented's code 2) stays unit-testable even when no current
+// subcommand is actually a stub.
+func exitCodeForErr(err error) int {
 	if errors.Is(err, errNotImplemented) {
 		return 2
 	}

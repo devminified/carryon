@@ -62,6 +62,7 @@ carryon/
 │       ├── confirm-pull/                writes audit_log's "pull_complete" row once a real pull fully succeeds (CO-304) — not in Doc's original RPC list, see edge-functions.md
 │       ├── get-session-transcript/      backs the web session viewer (CO-403) — viewer-role transcript chunks only, not get-manifest reused; writes audit_log's "view" row; see edge-functions.md
 │       ├── get-session-family/          backs the session viewer's fork family tree (CO-404) — an iterative up-then-down walk over parent_session_id, not a recursive SQL CTE; see edge-functions.md
+│       ├── rename-session/               `carryon rename <id> "<title>"`'s backend (CO-405) — the web app's own rename goes straight through a Server Action + RLS instead, see edge-functions.md
 │       ├── .env.example                 Edge Function secrets beyond Supabase's own auto-provided ones (CO-303: GITHUB_APP_*, CRON_SECRET; CO-306: RESCAN_CRON_SECRET; CO-307: PURGE_CRON_SECRET) — supabase/functions/.env (gitignored) for local dev
 │       └── _shared/                    schema validation, has_role helper, Resend/Slack clients, github.ts (GitHub App JWT + installation token + team members, CO-303), storage.ts (resolveBucket — a project's dedicated bucket, or the shared default, CO-305), redact.ts (hand-kept TS port of internal/redact's rule patterns, CO-306), zstd.ts (the one function that reads/rewrites chunk bytes directly, CO-306)
 │
@@ -84,15 +85,15 @@ carryon/
 │       │   │   ├── data/actions.ts     signOut() — a 'use server' function bound straight to a <form action={...}>, not a table mutation; see layers.md's note on why ui/ may import this but not data/queries.ts
 │       │   │   └── ui/{login-form,user-menu}.tsx
 │       │   ├── sessions/
-│       │   │   ├── types.ts, schemas.ts
-│       │   │   ├── data/{queries,mutations,actions,keys}.ts   CO-402: project session list (filters, search, pagination)
-│       │   │   ├── hooks/, ui/                                 CO-402: live-updating session table
+│       │   │   ├── types.ts, schemas.ts  schemas.ts (CO-405): renameSessionSchema/pinSessionSchema — mirrors rename-session's own Zod bounds, see edge-functions.md
+│       │   │   ├── data/{queries,mutations,actions,keys}.ts   CO-402: project session list (filters, search, pagination); actions.ts (CO-405): renameSessionAction/pinSessionAction, the web app's own rename/pin path (direct Server Actions + RLS, not the rename-session Edge Function — that one's for the CLI)
+│       │   │   ├── hooks/, ui/                                 CO-402: live-updating session table; sortItems (CO-405, in hooks/use-live-sessions.ts) re-sorts pinned-first on every realtime merge; ui/pin-button.tsx (CO-405): admin-only pin toggle
 │       │   │   └── viewer/                                     CO-403: the session viewer, its own types/data/lib/hooks/ui — big enough a sub-feature to get its own subtree rather than crowd the module's top level
 │       │   │       ├── types.ts
 │       │   │       ├── data/queries.ts    getSessionTranscript() — calls get-session-transcript, collapses its 403/404 to notFound(); getSessionFamily() (CO-404) — calls get-session-family, collapses 403/404 to an empty tree (not notFound — getSessionTranscript already proved the session's real)
 │       │   │       ├── lib/               parse-transcript.ts (the real Claude Code JSONL schema), zstd.ts (WASM decode, see next.config.ts's resolveAlias note), fetch-transcript.ts, correlate.ts (tool_use/tool_result pairing), tool-summary.ts, group-chunks.ts, build-family-tree.ts (CO-404: groups FamilyNodes by parentId for the tree UI)
 │       │   │       ├── hooks/use-transcript.ts   progressive per-chunk loading
-│       │   │       └── ui/                prose Markdown, redaction highlighting, collapsible tool calls + diffs, virtualized (@tanstack/react-virtual), side panel, subagent streams, family-tree.tsx (CO-404: the fork lineage tree, rendered in the side panel)
+│       │   │       └── ui/                prose Markdown, redaction highlighting, collapsible tool calls + diffs, virtualized (@tanstack/react-virtual), side panel, subagent streams, family-tree.tsx (CO-404: the fork lineage tree, rendered in the side panel), rename-control.tsx (CO-405: renames a session from the side panel, shown only when the page's own canRename check — owner or admin — passes)
 │       │   ├── projects/               types.ts, data/queries.ts (CO-401: listProjectsForCurrentUser, getProjectForCurrentUser), ui/project-switcher.tsx
 │       │   └── admin/
 │       ├── shared/

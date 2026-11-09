@@ -5,6 +5,7 @@ import { formatBytes } from '@/shared/lib/format/bytes';
 import { formatRelativeTime } from '@/shared/lib/format/date';
 import { OutcomeBadge } from '../../ui/outcome-badge';
 import { FamilyTree } from './family-tree';
+import { RenameControl } from './rename-control';
 import type { FamilyNode, SessionTranscriptMeta } from '../types';
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -20,10 +21,15 @@ export function SidePanel({
   session,
   familyNodes,
   danglingParentId,
+  canRename,
 }: {
   session: SessionTranscriptMeta;
   familyNodes: FamilyNode[];
   danglingParentId: string | null;
+  // CO-405: the owner or a project admin — see the page's own
+  // canRename computation. RLS is still the real enforcement for the
+  // rename itself.
+  canRename: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const pullCommand = `carryon pull ${session.id}`;
@@ -42,9 +48,13 @@ export function SidePanel({
   return (
     <aside className="border-border flex w-72 flex-shrink-0 flex-col gap-4 border-l pl-4">
       <div>
-        <h2 className="text-foreground text-sm font-semibold">
-          {session.title ?? '(untitled session)'}
-        </h2>
+        {canRename ? (
+          <RenameControl sessionId={session.id} title={session.title} />
+        ) : (
+          <h2 className="text-foreground text-sm font-semibold">
+            {session.title ?? '(untitled session)'}
+          </h2>
+        )}
         {session.summary && <p className="text-muted-foreground mt-1 text-sm">{session.summary}</p>}
       </div>
 

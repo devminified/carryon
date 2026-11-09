@@ -80,10 +80,16 @@ export async function listSessionsForProject(
     }
   }
 
+  // CO-405: pinned leads the sort. `.lt`/`.eq` on a boolean column
+  // works the same way Postgres orders booleans (false < true) — the
+  // cursor's three-level OR below is the same keyset-pagination
+  // pattern CO-402 already used for (last_activity_at, id), just
+  // extended one level for the new leading column.
   let query = supabase
     .from('sessions')
     .select('*')
     .eq('project_id', projectId)
+    .order('pinned', { ascending: false })
     .order('last_activity_at', { ascending: false })
     .order('id', { ascending: false })
     .limit(SESSION_PAGE_SIZE + 1);
@@ -102,7 +108,9 @@ export async function listSessionsForProject(
   }
   if (cursor) {
     query = query.or(
-      `last_activity_at.lt.${cursor.lastActivityAt},and(last_activity_at.eq.${cursor.lastActivityAt},id.lt.${cursor.id})`,
+      `pinned.lt.${cursor.pinned},` +
+        `and(pinned.eq.${cursor.pinned},last_activity_at.lt.${cursor.lastActivityAt}),` +
+        `and(pinned.eq.${cursor.pinned},last_activity_at.eq.${cursor.lastActivityAt},id.lt.${cursor.id})`,
     );
   }
 
@@ -118,6 +126,7 @@ export async function listSessionsForProject(
   const items: SessionListItem[] = page.map((r) => ({
     id: r.id,
     projectId: r.project_id,
+    userId: r.user_id,
     title: r.title,
     summary: r.summary,
     branch: r.branch,
@@ -126,11 +135,14 @@ export async function listSessionsForProject(
     lastActivityAt: r.last_activity_at,
     totalBytes: r.total_bytes,
     ownerLogin: logins.get(r.user_id) ?? null,
+    pinned: r.pinned,
   }));
 
   const last = page[page.length - 1];
   const nextCursor =
-    hasMore && last ? { lastActivityAt: last.last_activity_at, id: last.id } : null;
+    hasMore && last
+      ? { pinned: last.pinned, lastActivityAt: last.last_activity_at, id: last.id }
+      : null;
 
   return { items, nextCursor };
 }

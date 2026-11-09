@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useLiveSessions } from '../hooks/use-live-sessions';
 import { LiveDot } from './live-dot';
 import { OutcomeBadge } from './outcome-badge';
+import { PinButton } from './pin-button';
 import { formatRelativeTime } from '@/shared/lib/format/date';
 import { formatBytes } from '@/shared/lib/format/bytes';
 import { LIVE_ACTIVITY_WINDOW_MS, type SessionListFilters, type SessionListItem } from '../types';
@@ -13,11 +14,16 @@ export function SessionTable({
   initialItems,
   filters,
   isFirstPage,
+  isAdmin,
 }: {
   projectId: string;
   initialItems: SessionListItem[];
   filters: SessionListFilters;
   isFirstPage: boolean;
+  // CO-405: only an admin sees the pin toggle at all — RLS
+  // (admins_can_update_sessions) is still the real enforcement if this
+  // ever disagreed with the server's own view of the caller's role.
+  isAdmin: boolean;
 }) {
   const { items, now } = useLiveSessions(projectId, initialItems, filters, isFirstPage);
 
@@ -29,6 +35,7 @@ export function SessionTable({
     <table className="w-full table-auto text-left text-sm">
       <thead>
         <tr className="border-border text-muted-foreground border-b">
+          <th className="w-6 py-2 pr-2" aria-label="Pinned" />
           <th className="py-2 pr-4">Session</th>
           <th className="py-2 pr-4">Developer</th>
           <th className="py-2 pr-4">Branch</th>
@@ -45,6 +52,17 @@ export function SessionTable({
             now - new Date(s.lastActivityAt).getTime() < LIVE_ACTIVITY_WINDOW_MS;
           return (
             <tr key={s.id} className="border-border border-b">
+              <td className="py-2 pr-2">
+                {isAdmin ? (
+                  <PinButton sessionId={s.id} projectId={projectId} pinned={s.pinned} />
+                ) : (
+                  s.pinned && (
+                    <span aria-label="Pinned session" title="Pinned session" className="text-base leading-none">
+                      📌
+                    </span>
+                  )
+                )}
+              </td>
               <td className="py-2 pr-4">
                 <Link href={`/sessions/${s.id}`} className="text-foreground font-medium underline">
                   {s.title ?? '(untitled session)'}

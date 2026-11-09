@@ -13,6 +13,7 @@ export const LIVE_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
 export type SessionListItem = {
   id: string;
   projectId: string;
+  userId: string;
   title: string | null;
   summary: string | null;
   branch: string | null;
@@ -21,9 +22,15 @@ export type SessionListItem = {
   lastActivityAt: string;
   totalBytes: number;
   ownerLogin: string | null;
+  // CO-405
+  pinned: boolean;
 };
 
-export type SessionListCursor = { lastActivityAt: string; id: string };
+// pinned leads the sort (pinned desc, last_activity_at desc, id desc,
+// see listSessionsForProject) — the cursor carries all three so a
+// "Load more" page can resume exactly where the previous one ended,
+// including across the pinned-to-unpinned boundary.
+export type SessionListCursor = { pinned: boolean; lastActivityAt: string; id: string };
 
 export type SessionListFilters = {
   dev?: string;

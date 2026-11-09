@@ -32,6 +32,28 @@ export async function requireUser(): Promise<CurrentUser> {
   return user;
 }
 
+// CO-405: a non-redirecting counterpart to requireRole, for pages a
+// viewer may still see (the session list, the session viewer) where
+// the caller's actual role only decides whether to show an admin-only
+// control (the pin toggle) or an owner-or-admin one (rename) — not
+// whether the page itself loads. Same "UI convenience, not the
+// security boundary" caveat as requireRole: the real enforcement for
+// any write this drives is RLS (admins_can_update_sessions /
+// owner_can_update_their_sessions), not this read.
+export async function getCurrentRole(projectId: string): Promise<Role | null> {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('project_members')
+    .select('role')
+    .eq('project_id', projectId)
+    .eq('user_id', user.id)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data.role;
+}
+
 // Application-layer convenience only (auth.md) — RLS's has_role() is the
 // actual security boundary. This exists to drive UI decisions and fail
 // fast with a clear redirect, not to replace a missing RLS policy.

@@ -257,12 +257,14 @@ export type Database = {
           original_cwd: string
           outcome: string | null
           parent_session_id: string | null
+          pinned: boolean
           project_id: string
           search_vector: unknown
           started_at: string
           status: string
           summary: string | null
           title: string | null
+          title_source: string
           total_bytes: number
           user_id: string
         }
@@ -278,12 +280,14 @@ export type Database = {
           original_cwd: string
           outcome?: string | null
           parent_session_id?: string | null
+          pinned?: boolean
           project_id: string
           search_vector?: unknown
           started_at?: string
           status?: string
           summary?: string | null
           title?: string | null
+          title_source?: string
           total_bytes?: number
           user_id: string
         }
@@ -299,12 +303,14 @@ export type Database = {
           original_cwd?: string
           outcome?: string | null
           parent_session_id?: string | null
+          pinned?: boolean
           project_id?: string
           search_vector?: unknown
           started_at?: string
           status?: string
           summary?: string | null
           title?: string | null
+          title_source?: string
           total_bytes?: number
           user_id?: string
         }
