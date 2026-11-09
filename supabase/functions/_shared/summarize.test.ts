@@ -196,6 +196,7 @@ Deno.test("writes title/summary/outcome/files_touched from a valid response", as
   assertEquals(updated?.outcome, "done");
   assertEquals(updated?.blocked_reason, null);
   assert((updated?.files_touched as string[]).includes("/repo/webhook.ts"));
+  assertEquals(updated?.summarized_at, "2026-06-15T12:00:00.000Z");
 });
 
 Deno.test("never overwrites a manual title (CO-405's own contract)", async () => {

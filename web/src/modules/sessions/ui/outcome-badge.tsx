@@ -12,8 +12,25 @@ const CLASS: Record<SessionOutcome, string> = {
   blocked: 'bg-red-100 text-red-800',
 };
 
-export function OutcomeBadge({ outcome }: { outcome: string | null }) {
+export function OutcomeBadge({
+  outcome,
+  blockedReason,
+}: {
+  outcome: string | null;
+  // CO-408: a native tooltip is enough here — this badge already
+  // appears in the dense session-table row, so a second, always-
+  // visible line of text isn't worth the layout cost for the one
+  // outcome value that has extra context to show.
+  blockedReason?: string | null;
+}) {
   if (!outcome || !(outcome in LABEL)) return null;
   const o = outcome as SessionOutcome;
-  return <span className={`rounded px-2 py-0.5 text-xs font-medium ${CLASS[o]}`}>{LABEL[o]}</span>;
+  return (
+    <span
+      className={`rounded px-2 py-0.5 text-xs font-medium ${CLASS[o]}`}
+      title={o === 'blocked' ? (blockedReason ?? undefined) : undefined}
+    >
+      {LABEL[o]}
+    </span>
+  );
 }

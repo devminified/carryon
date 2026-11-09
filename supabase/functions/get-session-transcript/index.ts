@@ -100,7 +100,7 @@ export async function handle(
   const { data: session, error: sessionErr } = await admin
     .from("sessions")
     .select(
-      "project_id, user_id, original_cwd, branch, status, outcome, title, summary, files_touched, parent_session_id, total_bytes, started_at, last_activity_at",
+      "project_id, user_id, original_cwd, branch, status, outcome, blocked_reason, title, summary, summarized_at, files_touched, parent_session_id, total_bytes, started_at, last_activity_at",
     )
     .eq("id", input.sessionId)
     .maybeSingle();
@@ -229,8 +229,10 @@ export async function handle(
         branch: session.branch,
         status: session.status,
         outcome: session.outcome,
+        blockedReason: session.blocked_reason,
         title: session.title,
         summary: session.summary,
+        summarizedAt: session.summarized_at,
         filesTouched: session.files_touched ?? [],
         parentSessionId: session.parent_session_id,
         totalBytes: session.total_bytes,

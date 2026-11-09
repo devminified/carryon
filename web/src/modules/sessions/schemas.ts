@@ -15,3 +15,9 @@ export const pinSessionSchema = z.object({
   pinned: z.boolean(),
 });
 export type PinSessionInput = z.infer<typeof pinSessionSchema>;
+
+// CO-408
+export const resummarizeSessionSchema = z.object({
+  sessionId: z.string().uuid(),
+});
+export type ResummarizeSessionInput = z.infer<typeof resummarizeSessionSchema>;

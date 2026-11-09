@@ -55,7 +55,16 @@ export function SidePanel({
             {session.title ?? '(untitled session)'}
           </h2>
         )}
-        {session.summary && <p className="text-muted-foreground mt-1 text-sm">{session.summary}</p>}
+        {session.summary && (
+          <>
+            <p className="text-muted-foreground mt-1 text-sm">{session.summary}</p>
+            {session.summarizedAt && (
+              <p className="text-muted-foreground/70 mt-0.5 text-xs">
+                AI-generated · {formatRelativeTime(session.summarizedAt)}
+              </p>
+            )}
+          </>
+        )}
       </div>
 
       <dl className="flex flex-col gap-3">
@@ -63,7 +72,9 @@ export function SidePanel({
         <Row label="Branch">{session.branch ?? '—'}</Row>
         <Row label="Status">{session.status}</Row>
         <Row label="Outcome">
-          {session.outcome ? <OutcomeBadge outcome={session.outcome} /> : '—'}
+          {session.outcome
+            ? <OutcomeBadge outcome={session.outcome} blockedReason={session.blockedReason} />
+            : '—'}
         </Row>
         <Row label="Last activity">{formatRelativeTime(session.lastActivityAt)}</Row>
         <Row label="Size">{formatBytes(session.totalBytes)}</Row>

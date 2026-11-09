@@ -86,6 +86,15 @@ export const RENAME_PROJECT_B_ID = '66666666-6666-6666-6666-666666666406';
 export const PIN_ADMIN_TARGET_ID = '88888888-8888-4888-8888-888888888409';
 export const PIN_ADMIN_OTHER_ID = '88888888-8888-4888-8888-888888888410';
 
+// CO-408 (summary display and re-run). SUMMARY_SESSION_ID reuses
+// RENAME_PROJECT_B_ID (ali: admin there) to exercise the real
+// "Re-summarize" button + its rate limit; SUMMARY_VIEWER_SESSION_ID
+// reuses RENAME_PROJECT_A_ID (ali: viewer there) to confirm a non-
+// admin sees the summary/outcome/files-touched display but no
+// Re-summarize control at all.
+export const SUMMARY_SESSION_ID = '88888888-8888-4888-8888-888888888411';
+export const SUMMARY_VIEWER_SESSION_ID = '88888888-8888-4888-8888-888888888412';
+
 const PLAIN_LINES = [
   {
     type: 'user',
@@ -341,7 +350,20 @@ async function seedSession(
 // path to add here.
 async function seedForkSession(
   admin,
-  { sessionId, projectId, userId, title, parentSessionId, lastActivityAt, pinned },
+  {
+    sessionId,
+    projectId,
+    userId,
+    title,
+    parentSessionId,
+    lastActivityAt,
+    pinned,
+    summary,
+    outcome,
+    blockedReason,
+    filesTouched,
+    summarizedAt,
+  },
 ) {
   const { error } = await admin.from('sessions').upsert({
     id: sessionId,
@@ -354,6 +376,11 @@ async function seedForkSession(
     total_bytes: 0,
     ...(lastActivityAt ? { last_activity_at: lastActivityAt } : {}),
     ...(pinned !== undefined ? { pinned } : {}),
+    ...(summary !== undefined ? { summary } : {}),
+    ...(outcome !== undefined ? { outcome } : {}),
+    ...(blockedReason !== undefined ? { blocked_reason: blockedReason } : {}),
+    ...(filesTouched !== undefined ? { files_touched: filesTouched } : {}),
+    ...(summarizedAt !== undefined ? { summarized_at: summarizedAt } : {}),
   });
   if (error) throw new Error(`seedForkSession failed for ${sessionId}: ${error.message}`);
 }
@@ -586,6 +613,41 @@ async function main() {
     userId: ALI_USER_ID,
     title: 'newer unrelated session',
     lastActivityAt: '2026-06-01T00:00:00Z',
+  });
+
+  // CO-408: a real, already-summarized session — ali is admin on
+  // RENAME_PROJECT_B_ID, so this is where the real Re-summarize button
+  // + rate limit get exercised.
+  await seedForkSession(admin, {
+    sessionId: SUMMARY_SESSION_ID,
+    projectId: RENAME_PROJECT_B_ID,
+    userId: ALI_USER_ID,
+    title: 'fix the payment webhook retry bug',
+    // Older than every other RENAME_PROJECT_B_ID fixture's own
+    // last_activity_at (rename-and-pin.spec.ts's own "newer unrelated
+    // session" sorts first assumption depends on that) — this session
+    // doesn't need to be recent for anything this spec checks.
+    lastActivityAt: '2025-01-01T00:00:00Z',
+    summary:
+      'The developer asked to fix a flaky payment webhook retry. Claude found the backoff bug in webhook.ts and fixed it. All tests now pass.',
+    outcome: 'done',
+    filesTouched: ['/repo/webhook.ts', '/repo/webhook.test.ts'],
+    summarizedAt: '2026-06-15T11:55:00Z',
+  });
+
+  // Same real summary, but in RENAME_PROJECT_A_ID where ali is only a
+  // viewer — confirms the summary/outcome/files-touched display shows
+  // the same way for a non-admin, with no Re-summarize control at all.
+  await seedForkSession(admin, {
+    sessionId: SUMMARY_VIEWER_SESSION_ID,
+    projectId: RENAME_PROJECT_A_ID,
+    userId: SARA_USER_ID,
+    title: 'investigate the retry queue blocker',
+    summary: 'The developer asked Claude to look into a stuck retry queue, but it is waiting on new API credentials.',
+    outcome: 'blocked',
+    blockedReason: 'waiting on new API credentials',
+    filesTouched: ['/repo/queue.ts'],
+    summarizedAt: '2026-06-15T11:55:00Z',
   });
 
   console.log('viewer fixtures seeded');

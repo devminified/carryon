@@ -62,8 +62,10 @@ function fakeDeps(opts: {
                             branch: "main",
                             status: "ended",
                             outcome: "done",
+                            blocked_reason: null,
                             title: "fix payment webhook",
                             summary: "rewrote the retry backoff",
+                            summarized_at: "2026-01-01T18:40:00Z",
                             files_touched: ["webhook.ts"],
                             parent_session_id: null,
                             total_bytes: 4096,
@@ -264,6 +266,8 @@ Deno.test("returns session metadata for the side panel", async () => {
   assertEquals(body.session.summary, "rewrote the retry backoff");
   assertEquals(body.session.outcome, "done");
   assertEquals(body.session.filesTouched, ["webhook.ts"]);
+  assertEquals(body.session.summarizedAt, "2026-01-01T18:40:00Z");
+  assertEquals(body.session.blockedReason, null);
   assertEquals(body.session.projectName, "acme-api");
   assertEquals(body.session.totalBytes, 4096);
 });

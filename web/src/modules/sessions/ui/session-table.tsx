@@ -5,6 +5,7 @@ import { useLiveSessions } from '../hooks/use-live-sessions';
 import { LiveDot } from './live-dot';
 import { OutcomeBadge } from './outcome-badge';
 import { PinButton } from './pin-button';
+import { ResummarizeButton } from './resummarize-button';
 import { formatRelativeTime } from '@/shared/lib/format/date';
 import { formatBytes } from '@/shared/lib/format/bytes';
 import { LIVE_ACTIVITY_WINDOW_MS, type SessionListFilters, type SessionListItem } from '../types';
@@ -70,6 +71,26 @@ export function SessionTable({
                 {s.summary && (
                   <p className="text-muted-foreground line-clamp-2 text-xs">{s.summary}</p>
                 )}
+                <div className="text-muted-foreground/70 flex items-center gap-1 text-xs">
+                  {s.summary && (
+                    <span>
+                      AI-generated
+                      {s.summarizedAt && ` · ${formatRelativeTime(s.summarizedAt, new Date(now))}`}
+                      {s.filesTouched.length > 0 && (
+                        <span title={s.filesTouched.join('\n')}>
+                          {' '}
+                          · {s.filesTouched.length} file{s.filesTouched.length === 1 ? '' : 's'}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  {isAdmin && (
+                    <>
+                      {s.summary && <span>·</span>}
+                      <ResummarizeButton sessionId={s.id} projectId={projectId} />
+                    </>
+                  )}
+                </div>
               </td>
               <td className="text-foreground py-2 pr-4">{s.ownerLogin ?? '—'}</td>
               <td className="text-foreground py-2 pr-4">{s.branch ?? '—'}</td>
@@ -80,7 +101,7 @@ export function SessionTable({
                 </span>
               </td>
               <td className="py-2 pr-4">
-                <OutcomeBadge outcome={s.outcome} />
+                <OutcomeBadge outcome={s.outcome} blockedReason={s.blockedReason} />
               </td>
               <td className="text-foreground py-2 pr-4">
                 {formatRelativeTime(s.lastActivityAt, new Date(now))}

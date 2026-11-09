@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pinSessionSchema, renameSessionSchema } from './schemas';
+import { pinSessionSchema, renameSessionSchema, resummarizeSessionSchema } from './schemas';
 
 describe('renameSessionSchema', () => {
   it('trims the title', () => {
@@ -60,5 +60,18 @@ describe('pinSessionSchema', () => {
         pinned: 'true',
       }),
     ).toThrow();
+  });
+});
+
+describe('resummarizeSessionSchema', () => {
+  it('accepts a real session id', () => {
+    const result = resummarizeSessionSchema.parse({
+      sessionId: '11111111-1111-4111-8111-111111111111',
+    });
+    expect(result.sessionId).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
+  it('rejects a non-uuid session id', () => {
+    expect(() => resummarizeSessionSchema.parse({ sessionId: 'not-a-uuid' })).toThrow();
   });
 });

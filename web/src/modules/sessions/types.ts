@@ -19,11 +19,15 @@ export type SessionListItem = {
   branch: string | null;
   status: string;
   outcome: string | null;
+  blockedReason: string | null;
   lastActivityAt: string;
   totalBytes: number;
   ownerLogin: string | null;
   // CO-405
   pinned: boolean;
+  // CO-408
+  filesTouched: string[];
+  summarizedAt: string | null;
 };
 
 // pinned leads the sort (pinned desc, last_activity_at desc, id desc,

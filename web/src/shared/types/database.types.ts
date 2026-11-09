@@ -305,6 +305,7 @@ export type Database = {
           head_sha: string | null
           id: string
           last_activity_at: string
+          last_resummarize_requested_at: string | null
           machine: string | null
           original_cwd: string
           outcome: string | null
@@ -314,6 +315,7 @@ export type Database = {
           search_vector: unknown
           started_at: string
           status: string
+          summarized_at: string | null
           summarized_through_seq: number | null
           summary: string | null
           title: string | null
@@ -330,6 +332,7 @@ export type Database = {
           head_sha?: string | null
           id: string
           last_activity_at?: string
+          last_resummarize_requested_at?: string | null
           machine?: string | null
           original_cwd: string
           outcome?: string | null
@@ -339,6 +342,7 @@ export type Database = {
           search_vector?: unknown
           started_at?: string
           status?: string
+          summarized_at?: string | null
           summarized_through_seq?: number | null
           summary?: string | null
           title?: string | null
@@ -355,6 +359,7 @@ export type Database = {
           head_sha?: string | null
           id?: string
           last_activity_at?: string
+          last_resummarize_requested_at?: string | null
           machine?: string | null
           original_cwd?: string
           outcome?: string | null
@@ -364,6 +369,7 @@ export type Database = {
           search_vector?: unknown
           started_at?: string
           status?: string
+          summarized_at?: string | null
           summarized_through_seq?: number | null
           summary?: string | null
           title?: string | null
