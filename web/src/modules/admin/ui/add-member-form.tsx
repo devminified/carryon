@@ -13,7 +13,18 @@ export function AddMemberForm({ projectId }: { projectId: string }) {
         <label htmlFor="email" className="text-xs font-medium">
           Email
         </label>
-        <input id="email" name="email" type="email" required className="border-border rounded border px-2 py-1 text-sm" />
+        {/* suppressHydrationWarning — same Bitwarden-extension-injected-
+            attribute mismatch as login-form.tsx: a password manager
+            tags type="email" inputs for autofill matching before React
+            hydrates. */}
+        <input
+          id="email"
+          name="email"
+          type="email"
+          required
+          suppressHydrationWarning
+          className="border-border rounded border px-2 py-1 text-sm"
+        />
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="role" className="text-xs font-medium">
