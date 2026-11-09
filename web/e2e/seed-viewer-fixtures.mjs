@@ -21,6 +21,49 @@ export const REDACTED_SESSION_ID = '77777777-7777-4777-8777-777777777002';
 export const SUBAGENT_SESSION_ID = '77777777-7777-4777-8777-777777777003';
 export const LARGE_SESSION_ID = '77777777-7777-4777-8777-777777777004';
 
+// CO-404 (fork family tree) fixtures. Unlike the fixtures above, these
+// nodes don't need real Storage chunks — get-session-family only reads
+// the `sessions` table, and the family tree UI shows title/owner/time,
+// not transcript content — so they're seeded as plain rows (parent_
+// session_id set directly, the same field register-fork writes), not
+// through seedSession's zstd/Storage path.
+export const FORK_ROOT_SESSION_ID = '88888888-8888-4888-8888-888888888001';
+export const FORK_CHILD_A_SESSION_ID = '88888888-8888-4888-8888-888888888002';
+export const FORK_CHILD_B_SESSION_ID = '88888888-8888-4888-8888-888888888003';
+export const FORK_GRANDCHILD_SESSION_ID = '88888888-8888-4888-8888-888888888004';
+
+// A 10-node linear chain (depth 10) rooted independently of the tree
+// above, to exercise get-session-family's own MAX_HOPS/MAX_NODES walk
+// against a real (if small) deep chain rather than only a shallow tree.
+export const FORK_CHAIN_SESSION_IDS = Array.from(
+  { length: 10 },
+  (_, i) => `88888888-8888-4888-8888-88888888${String(10 + i).padStart(4, '0')}`,
+);
+
+// No live fixture for the "dangling parent" (deleted session) case:
+// sessions.parent_session_id is a real FK (`references sessions on
+// delete set null`), so deleting a parent always nulls out the child's
+// parent_session_id instead of ever leaving it pointing at a missing
+// row — the state get-session-family's findRoot defends against is
+// unreachable through this schema, by construction, not just in
+// practice. That logic is covered where it actually can be exercised:
+// get-session-family/index.test.ts's own mock (free of the real FK)
+// and build-family-tree.test.ts's synthetic danglingParentId case.
+
+// A second project ali is deliberately NOT a member of, holding a fork
+// (owned by sara@devminified.com, seed.sql's other real user — sessions'
+// own RLS lets an owner always read their own session, so the owner
+// must be someone other than ali for this to actually be inaccessible
+// to her) whose parent_session_id points into the tree above —
+// register-fork always inherits the parent's project_id (CO-208), so
+// this cross-project case can't occur from a real pull; it's
+// constructed here only so the viewer's "1 fork in a project you can't
+// see" branch (the real per-node RLS check in get-session-family) has
+// something real to render against.
+export const FORK_HIDDEN_PROJECT_ID = '66666666-6666-6666-6666-666666666099';
+export const FORK_HIDDEN_SESSION_ID = '88888888-8888-4888-8888-888888888040';
+const SARA_USER_ID = '22222222-2222-2222-2222-222222222222';
+
 const PLAIN_LINES = [
   {
     type: 'user',
@@ -269,6 +312,25 @@ async function seedSession(
   }
 }
 
+// CO-404: a plain sessions row with no chunks — get-session-family only
+// ever reads the sessions table (id/user_id/title/started_at/parent_
+// session_id), and the family tree UI renders those fields, not
+// transcript content, so there's nothing for seedSession's Storage/zstd
+// path to add here.
+async function seedForkSession(admin, { sessionId, projectId, userId, title, parentSessionId }) {
+  const { error } = await admin.from('sessions').upsert({
+    id: sessionId,
+    project_id: projectId,
+    user_id: userId,
+    original_cwd: '/repo',
+    status: 'ended',
+    title,
+    parent_session_id: parentSessionId ?? null,
+    total_bytes: 0,
+  });
+  if (error) throw new Error(`seedForkSession failed for ${sessionId}: ${error.message}`);
+}
+
 // A real multi-chunk session — every other fixture above is one chunk,
 // which never exercises streamChunksInOrder's actual seq-ordering logic
 // against >1 real chunk. 600 generated exchanges, 40 lines/chunk (~15
@@ -366,6 +428,69 @@ async function main() {
     title: 'large multi-chunk session',
     streams: { main: buildLargeSessionLines(600) },
     linesPerChunk: 120,
+  });
+
+  // CO-404: a branching fork tree (root -> {child-a, child-b}, child-a
+  // -> grandchild), depth 3.
+  await seedForkSession(admin, {
+    sessionId: FORK_ROOT_SESSION_ID,
+    projectId: VIEWER_PROJECT_ID,
+    userId: ALI_USER_ID,
+    title: 'investigate the retry queue race',
+  });
+  await seedForkSession(admin, {
+    sessionId: FORK_CHILD_A_SESSION_ID,
+    projectId: VIEWER_PROJECT_ID,
+    userId: ALI_USER_ID,
+    title: 'fork: try exponential backoff',
+    parentSessionId: FORK_ROOT_SESSION_ID,
+  });
+  await seedForkSession(admin, {
+    sessionId: FORK_CHILD_B_SESSION_ID,
+    projectId: VIEWER_PROJECT_ID,
+    userId: ALI_USER_ID,
+    title: 'fork: try a circuit breaker instead',
+    parentSessionId: FORK_ROOT_SESSION_ID,
+  });
+  await seedForkSession(admin, {
+    sessionId: FORK_GRANDCHILD_SESSION_ID,
+    projectId: VIEWER_PROJECT_ID,
+    userId: ALI_USER_ID,
+    title: 'fork: tune the backoff ceiling',
+    parentSessionId: FORK_CHILD_A_SESSION_ID,
+  });
+
+  // CO-404: a real 10-deep linear chain, independent of the tree above.
+  for (let i = 0; i < FORK_CHAIN_SESSION_IDS.length; i++) {
+    await seedForkSession(admin, {
+      sessionId: FORK_CHAIN_SESSION_IDS[i],
+      projectId: VIEWER_PROJECT_ID,
+      userId: ALI_USER_ID,
+      title: `fork chain link ${i + 1}`,
+      parentSessionId: i === 0 ? null : FORK_CHAIN_SESSION_IDS[i - 1],
+    });
+  }
+
+  // CO-404: a second project ali can't see, holding a fork of the tree
+  // above owned by sara, to exercise get-session-family's real
+  // per-node RLS visibility check.
+  await admin.from('projects').upsert({
+    id: FORK_HIDDEN_PROJECT_ID,
+    name: 'co404-hidden-project',
+    git_remote: 'github.com/devminified/co404-hidden-project',
+  });
+  await admin.from('project_members').upsert({
+    project_id: FORK_HIDDEN_PROJECT_ID,
+    user_id: SARA_USER_ID,
+    role: 'admin',
+    source: 'manual',
+  });
+  await seedForkSession(admin, {
+    sessionId: FORK_HIDDEN_SESSION_ID,
+    projectId: FORK_HIDDEN_PROJECT_ID,
+    userId: SARA_USER_ID,
+    title: 'a fork ali cannot see',
+    parentSessionId: FORK_ROOT_SESSION_ID,
   });
 
   console.log('viewer fixtures seeded');

@@ -1,11 +1,11 @@
 'use client';
 
-import Link from 'next/link';
 import { useState } from 'react';
 import { formatBytes } from '@/shared/lib/format/bytes';
 import { formatRelativeTime } from '@/shared/lib/format/date';
 import { OutcomeBadge } from '../../ui/outcome-badge';
-import type { SessionFork, SessionTranscriptMeta } from '../types';
+import { FamilyTree } from './family-tree';
+import type { FamilyNode, SessionTranscriptMeta } from '../types';
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -18,10 +18,12 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 export function SidePanel({
   session,
-  forks,
+  familyNodes,
+  danglingParentId,
 }: {
   session: SessionTranscriptMeta;
-  forks: SessionFork[];
+  familyNodes: FamilyNode[];
+  danglingParentId: string | null;
 }) {
   const [copied, setCopied] = useState(false);
   const pullCommand = `carryon pull ${session.id}`;
@@ -70,29 +72,7 @@ export function SidePanel({
         </div>
       )}
 
-      {session.parentSessionId && (
-        <Link
-          href={`/sessions/${session.parentSessionId}`}
-          className="text-muted-foreground text-xs underline"
-        >
-          ← parent session
-        </Link>
-      )}
-
-      {forks.length > 0 && (
-        <div>
-          <p className="text-muted-foreground text-xs">Forks</p>
-          <ul className="mt-1 flex flex-col gap-0.5">
-            {forks.map((f) => (
-              <li key={f.id}>
-                <Link href={`/sessions/${f.id}`} className="text-foreground text-xs underline">
-                  {f.title ?? f.id.slice(0, 8)}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <FamilyTree nodes={familyNodes} danglingParentId={danglingParentId} />
 
       <div>
         <p className="text-muted-foreground mb-1 text-xs">Resume this session</p>
