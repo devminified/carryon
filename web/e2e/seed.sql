@@ -14,9 +14,14 @@ values
   ('33333333-3333-3333-3333-333333333333', '22222222-2222-2222-2222-222222222222', 'viewer', 'manual')
 on conflict (project_id, user_id) do nothing;
 
+-- A deterministic id (not gen_random_uuid()) is what makes "on conflict
+-- (id) do nothing" below actually a no-op on re-run instead of silently
+-- inserting another 10,050 rows every time — found for real: wiring
+-- this script into pnpm's pretest:e2e re-seed hook duplicated the whole
+-- project to 20,100 rows on the very next run.
 insert into sessions (id, project_id, user_id, original_cwd, branch, status, outcome, title, summary, last_activity_at, started_at, total_bytes)
 select
-  gen_random_uuid(),
+  ('33333333-aaaa-4aaa-8aaa-' || lpad(i::text, 12, '0'))::uuid,
   '33333333-3333-3333-3333-333333333333'::uuid,
   case when i % 5 = 0 then '22222222-2222-2222-2222-222222222222'::uuid else '11111111-1111-1111-1111-111111111111'::uuid end,
   '/tmp/co402',

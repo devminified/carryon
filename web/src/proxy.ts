@@ -45,32 +45,52 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
-  // CO-402: a real 404 for a project the caller can't see has to happen
-  // here, before the page starts streaming — (dashboard)/loading.tsx
-  // means the page's own response already committed its 200 status by
-  // the time its Server Component calls notFound() (Next's own
-  // loading.tsx doc, "Status codes": "Calling notFound() before
-  // streaming starts returns a 404" — after it, the 200 already sent
-  // can't be un-sent). This is the one check that query is cheap enough
-  // to run on every request to this one path shape.
-  const projectMatch = request.nextUrl.pathname.match(
-    /^\/p\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i,
+  // CO-402/CO-403: a real 404 for a resource the caller can't see (RLS
+  // returns zero rows either way — "doesn't exist" and "not a member"
+  // collapse to the same answer, by design) has to happen here, before
+  // the page starts streaming — (dashboard)/loading.tsx means the
+  // page's own response already committed its 200 status by the time
+  // its Server Component calls notFound() (Next's own loading.tsx doc,
+  // "Status codes": "Calling notFound() before streaming starts
+  // returns a 404" — after it, the 200 already sent can't be un-sent).
+  // Each of these two queries is cheap enough to run on every request
+  // matching its own narrow path shape.
+  const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+  const projectMatch = request.nextUrl.pathname.match(new RegExp(`^/p/(${uuid})(?:/|$)`, 'i'));
+  const sessionMatch = request.nextUrl.pathname.match(
+    new RegExp(`^/sessions/(${uuid})(?:/|$)`, 'i'),
   );
+
   if (data.user && projectMatch) {
     const { data: project } = await supabase
       .from('projects')
       .select('id')
       .eq('id', projectMatch[1])
       .maybeSingle();
-    if (!project) {
-      return new NextResponse('This page could not be found.', {
-        status: 404,
-        headers: { 'content-type': 'text/plain; charset=utf-8' },
-      });
-    }
+    if (!project) return notFoundResponse();
+  }
+
+  if (data.user && sessionMatch) {
+    // owner_or_member_can_read_sessions (CO-302) is itself "owner OR
+    // viewer+" — exactly the minimum role get-session-transcript
+    // requires, so a null row here already means the real page load
+    // would also 404/403, no separate role check needed.
+    const { data: session } = await supabase
+      .from('sessions')
+      .select('id')
+      .eq('id', sessionMatch[1])
+      .maybeSingle();
+    if (!session) return notFoundResponse();
   }
 
   return response;
+}
+
+function notFoundResponse(): NextResponse {
+  return new NextResponse('This page could not be found.', {
+    status: 404,
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+  });
 }
 
 export const config = {

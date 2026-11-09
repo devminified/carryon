@@ -60,6 +60,7 @@ carryon/
 │       ├── delete-session/              carryon admin delete <sid> --reason's backend (CO-307)
 │       ├── sync-github-teams/           GitHub App auth + team membership → project_members reconciliation (CO-303)
 │       ├── confirm-pull/                writes audit_log's "pull_complete" row once a real pull fully succeeds (CO-304) — not in Doc's original RPC list, see edge-functions.md
+│       ├── get-session-transcript/      backs the web session viewer (CO-403) — viewer-role transcript chunks only, not get-manifest reused; writes audit_log's "view" row; see edge-functions.md
 │       ├── .env.example                 Edge Function secrets beyond Supabase's own auto-provided ones (CO-303: GITHUB_APP_*, CRON_SECRET; CO-306: RESCAN_CRON_SECRET; CO-307: PURGE_CRON_SECRET) — supabase/functions/.env (gitignored) for local dev
 │       └── _shared/                    schema validation, has_role helper, Resend/Slack clients, github.ts (GitHub App JWT + installation token + team members, CO-303), storage.ts (resolveBucket — a project's dedicated bucket, or the shared default, CO-305), redact.ts (hand-kept TS port of internal/redact's rule patterns, CO-306), zstd.ts (the one function that reads/rewrites chunk bytes directly, CO-306)
 │
@@ -74,7 +75,7 @@ carryon/
 │       │   │   ├── layout.tsx          auth-gated shell: top bar, project switcher, user menu (CO-401)
 │       │   │   ├── page.tsx            overview — CO-401 ships a bare project-list placeholder; CO-402 replaces it with the real per-project session list
 │       │   │   ├── p/[project]/page.tsx  CO-401 ships a bare role-gated placeholder; CO-402 builds out the real session list here
-│       │   │   ├── sessions/[id]/page.tsx
+│       │   │   ├── sessions/[id]/page.tsx  the real session viewer (CO-403): chat, collapsed tool calls, diffs, redaction highlighting, progressive chunk loading, virtualized
 │       │   │   └── admin/page.tsx
 │       │   └── api/                    only when Server Actions genuinely don't fit
 │       ├── modules/                    vertical slices, one per domain
@@ -83,15 +84,21 @@ carryon/
 │       │   │   └── ui/{login-form,user-menu}.tsx
 │       │   ├── sessions/
 │       │   │   ├── types.ts, schemas.ts
-│       │   │   ├── data/{queries,mutations,actions,keys}.ts
-│       │   │   ├── hooks/
-│       │   │   └── ui/
+│       │   │   ├── data/{queries,mutations,actions,keys}.ts   CO-402: project session list (filters, search, pagination)
+│       │   │   ├── hooks/, ui/                                 CO-402: live-updating session table
+│       │   │   └── viewer/                                     CO-403: the session viewer, its own types/data/lib/hooks/ui — big enough a sub-feature to get its own subtree rather than crowd the module's top level
+│       │   │       ├── types.ts
+│       │   │       ├── data/queries.ts    getSessionTranscript() — calls get-session-transcript, collapses its 403/404 to notFound()
+│       │   │       ├── lib/               parse-transcript.ts (the real Claude Code JSONL schema), zstd.ts (WASM decode, see next.config.ts's resolveAlias note), fetch-transcript.ts, correlate.ts (tool_use/tool_result pairing), tool-summary.ts, group-chunks.ts
+│       │   │       ├── hooks/use-transcript.ts   progressive per-chunk loading
+│       │   │       └── ui/                prose Markdown, redaction highlighting, collapsible tool calls + diffs, virtualized (@tanstack/react-virtual), side panel, subagent streams
 │       │   ├── projects/               types.ts, data/queries.ts (CO-401: listProjectsForCurrentUser, getProjectForCurrentUser), ui/project-switcher.tsx
 │       │   └── admin/
 │       ├── shared/
 │       │   ├── constants/{roles.ts, routes.ts}
 │       │   ├── types/{database.types.ts, auth.ts, common.ts}  # database.types.ts is generated — DO NOT EDIT
-│       │   ├── lib/{supabase/{client,server,admin}.ts, format/, auth.ts, utils.ts}
+│       │   ├── lib/{supabase/{client,server,admin}.ts, format/, auth.ts, utils.ts, edge-function.ts}  edge-function.ts (CO-403): server-side caller for Edge Functions outside the RLS-scoped table reads most of this app uses — same apikey/Authorization headers internal/api.Client.post uses
+│       │   ├── node-builtin-stub.js    empty fs/path shim for zstd-codec's Emscripten bundle (CO-403) — see next.config.ts's turbopack.resolveAlias comment; not a real polyfill, the Node-only code path it stands in for is dead in a browser
 │       │   └── ui/                     reusable presentational components, shadcn generated code
 │       └── proxy.ts                    auth refresh, route protection — Next.js 16 renamed middleware.ts to proxy.ts (same mechanism); see node_modules/next/dist/docs/.../middleware.md
 │
