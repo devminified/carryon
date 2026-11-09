@@ -33,6 +33,11 @@ import {
   readSessionMainChunks,
 } from "./condense-transcript.ts";
 import { resolveBucket } from "./storage.ts";
+import {
+  buildBlockedSessionMessage,
+  buildSessionUrl,
+  postToSlackWithRetry as realPostToSlackWithRetry,
+} from "./slack.ts";
 
 const MAX_API_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 500;
@@ -121,6 +126,12 @@ export interface SummarizeDeps {
   anthropicApiKey: string;
   sleep: (ms: number) => Promise<void>;
   now: () => Date;
+  // CO-409: optional so every existing call site (end-session,
+  // summarize-session's cron sweep, resummarize-session) keeps
+  // working unchanged — real callers fall back to the real Slack
+  // sender below; tests inject a stub to assert on what would have
+  // been sent, without ever making a real network call.
+  postToSlack?: typeof realPostToSlackWithRetry;
 }
 
 export type SummarizeOutcome =
@@ -213,7 +224,7 @@ export async function summarizeSession(
   const { data: session, error: sessionErr } = await deps.adminClient
     .from("sessions")
     .select(
-      "id, project_id, status, title, title_source, summary, summarized_through_seq, files_touched",
+      "id, project_id, user_id, status, title, title_source, summary, outcome, summarized_through_seq, files_touched",
     )
     .eq("id", sessionId)
     .maybeSingle();
@@ -351,5 +362,76 @@ export async function summarizeSession(
     .eq("id", sessionId);
   if (updateErr) throw updateErr;
 
+  // CO-409: notify Slack only on the transition INTO 'blocked', not
+  // on every subsequent sweep call that still finds the session
+  // blocked (the 30-minute cron sweep, or a later re-summarize,
+  // would otherwise re-notify the same blocker repeatedly). A missing
+  // project_notification_settings row (no project_id match at all)
+  // means notifications are off for this project — not an error.
+  if (parsed.outcome === "blocked" && session.outcome !== "blocked") {
+    const title = (update.title as string | undefined) ?? session.title ??
+      "a session";
+    await notifyBlockedSession(
+      deps,
+      session,
+      sessionId,
+      title,
+      parsed.blocked_reason!,
+    );
+  }
+
   return { status: "summarized" };
+}
+
+/** Looks up the project's own Slack config and the session's owner's
+ * GitHub login, then sends the blocked-session alert — logged and
+ * swallowed on any failure (a notification is never allowed to turn
+ * a successful summarization into a failed one). */
+async function notifyBlockedSession(
+  deps: SummarizeDeps,
+  session: { project_id: string; user_id: string },
+  sessionId: string,
+  sessionTitle: string,
+  blockedReason: string,
+): Promise<void> {
+  try {
+    const { data: settings, error: settingsErr } = await deps.adminClient
+      .from("project_notification_settings")
+      .select("slack_webhook_url")
+      .eq("project_id", session.project_id)
+      .maybeSingle();
+    if (settingsErr) {
+      console.error(
+        "summarizeSession: notification settings lookup failed",
+        settingsErr.code,
+      );
+      return;
+    }
+    const webhookUrl = settings?.slack_webhook_url;
+    if (!webhookUrl) return;
+
+    const { data: owner, error: ownerErr } = await deps.adminClient.auth.admin
+      .getUserById(session.user_id);
+    if (ownerErr) {
+      console.error(
+        "summarizeSession: session owner lookup failed for notification",
+        ownerErr,
+      );
+    }
+    const developerLogin = owner?.user?.user_metadata?.user_name ?? null;
+
+    const message = buildBlockedSessionMessage({
+      sessionTitle,
+      developerLogin,
+      blockedReason,
+      sessionUrl: buildSessionUrl(sessionId),
+    });
+    const sendSlack = deps.postToSlack ?? realPostToSlackWithRetry;
+    await sendSlack(webhookUrl, message);
+  } catch (e) {
+    console.error(
+      `summarizeSession: blocked-session notification failed for session ${sessionId}`,
+      e instanceof Error ? e.message : String(e),
+    );
+  }
 }

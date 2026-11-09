@@ -185,6 +185,32 @@ export type Database = {
           },
         ]
       }
+      project_notification_settings: {
+        Row: {
+          notify_digest: boolean
+          project_id: string
+          slack_webhook_url: string | null
+        }
+        Insert: {
+          notify_digest?: boolean
+          project_id: string
+          slack_webhook_url?: string | null
+        }
+        Update: {
+          notify_digest?: boolean
+          project_id?: string
+          slack_webhook_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_notification_settings_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: true
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       projects: {
         Row: {
           bucket: string | null

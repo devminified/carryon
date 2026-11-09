@@ -27,6 +27,10 @@ interface FakeOpts {
   anthropicResponses?: Array<AnthropicResult | Error>;
   onUpdate?: (patch: Record<string, unknown>) => void;
   onUsageInsert?: (row: Record<string, unknown>) => void;
+  // CO-409
+  notificationSettings?: { slack_webhook_url: string | null } | null;
+  ownerLogin?: string | null;
+  ownerLookupError?: unknown;
 }
 
 async function fakeAdmin(opts: FakeOpts) {
@@ -51,10 +55,12 @@ async function fakeAdmin(opts: FakeOpts) {
                         ? {
                           id: SESSION_ID,
                           project_id: PROJECT_ID,
+                          user_id: "u1",
                           status: "ended",
                           title: null,
                           title_source: "ai",
                           summary: null,
+                          outcome: null,
                           summarized_through_seq: null,
                           files_touched: [],
                         }
@@ -129,6 +135,19 @@ async function fakeAdmin(opts: FakeOpts) {
           }),
         };
       }
+      if (table === "project_notification_settings") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: opts.notificationSettings ?? null,
+                  error: null,
+                }),
+            }),
+          }),
+        };
+      }
       throw new Error(`unexpected table ${table}`);
     },
     storage: {
@@ -144,6 +163,23 @@ async function fakeAdmin(opts: FakeOpts) {
           });
         },
       }),
+    },
+    auth: {
+      admin: {
+        getUserById: () =>
+          Promise.resolve(
+            opts.ownerLookupError
+              ? { data: null, error: opts.ownerLookupError }
+              : {
+                data: {
+                  user: {
+                    user_metadata: { user_name: opts.ownerLogin ?? null },
+                  },
+                },
+                error: null,
+              },
+          ),
+      },
     },
     // deno-lint-ignore no-explicit-any
   } as any;
@@ -163,7 +199,11 @@ function fakeCallAnthropic(responses: Array<AnthropicResult | Error>) {
   };
 }
 
-async function buildDeps(opts: FakeOpts): Promise<SummarizeDeps> {
+async function buildDeps(
+  opts: FakeOpts,
+  // deno-lint-ignore no-explicit-any
+  postToSlack?: (webhookUrl: string, payload: any) => Promise<boolean>,
+): Promise<SummarizeDeps> {
   const admin = await fakeAdmin(opts);
   return {
     adminClient: admin,
@@ -178,6 +218,7 @@ async function buildDeps(opts: FakeOpts): Promise<SummarizeDeps> {
     anthropicApiKey: "test-key",
     sleep: () => Promise.resolve(),
     now: () => new Date("2026-06-15T12:00:00Z"),
+    postToSlack,
   };
 }
 
@@ -313,6 +354,126 @@ Deno.test("writes blocked_reason when outcome is blocked", async () => {
   await summarizeSession(deps, SESSION_ID);
   assertEquals(updated?.outcome, "blocked");
   assertEquals(updated?.blocked_reason, "waiting on API credentials");
+});
+
+Deno.test("CO-409: notifies Slack on the transition into blocked, when a webhook is configured", async () => {
+  // deno-lint-ignore no-explicit-any
+  let sent: any = null;
+  const deps = await buildDeps(
+    {
+      chunkTexts: ["line one\n"],
+      anthropicResponses: [
+        {
+          text: validResponseText({
+            outcome: "blocked",
+            blocked_reason: "waiting on API credentials",
+          }),
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ],
+      notificationSettings: {
+        slack_webhook_url: "https://hooks.slack.com/services/T0/B0/x",
+      },
+      ownerLogin: "ali",
+    },
+    (webhookUrl, payload) => {
+      sent = { webhookUrl, payload };
+      return Promise.resolve(true);
+    },
+  );
+  const outcome = await summarizeSession(deps, SESSION_ID);
+  assertEquals(outcome, { status: "summarized" });
+  assertEquals(sent?.webhookUrl, "https://hooks.slack.com/services/T0/B0/x");
+  assert(sent?.payload.text.includes("waiting on API credentials"));
+  assert(sent?.payload.text.includes("ali's session"));
+});
+
+Deno.test("CO-409: sends no Slack message when the project has no webhook configured", async () => {
+  let posts = 0;
+  const deps = await buildDeps(
+    {
+      chunkTexts: ["line one\n"],
+      anthropicResponses: [
+        {
+          text: validResponseText({
+            outcome: "blocked",
+            blocked_reason: "waiting on API credentials",
+          }),
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ],
+      // notificationSettings omitted entirely — no row, notifications off
+    },
+    () => {
+      posts++;
+      return Promise.resolve(true);
+    },
+  );
+  await summarizeSession(deps, SESSION_ID);
+  assertEquals(posts, 0);
+});
+
+Deno.test("CO-409: does not re-notify when the session was already blocked before this run", async () => {
+  let posts = 0;
+  const deps = await buildDeps(
+    {
+      chunkTexts: ["line one\n"],
+      session: {
+        id: SESSION_ID,
+        project_id: PROJECT_ID,
+        user_id: "u1",
+        status: "live",
+        title: "already blocked session",
+        title_source: "ai",
+        summary: "existing summary",
+        outcome: "blocked", // already blocked going into this run
+        summarized_through_seq: null,
+        files_touched: [],
+      },
+      anthropicResponses: [
+        {
+          text: validResponseText({
+            outcome: "blocked",
+            blocked_reason: "still waiting on API credentials",
+          }),
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ],
+      notificationSettings: {
+        slack_webhook_url: "https://hooks.slack.com/services/T0/B0/x",
+      },
+    },
+    () => {
+      posts++;
+      return Promise.resolve(true);
+    },
+  );
+  const outcome = await summarizeSession(deps, SESSION_ID);
+  assertEquals(outcome, { status: "summarized" });
+  assertEquals(posts, 0);
+});
+
+Deno.test("CO-409: a Slack notification failure never surfaces as a failed summarization", async () => {
+  const deps = await buildDeps(
+    {
+      chunkTexts: ["line one\n"],
+      anthropicResponses: [
+        {
+          text: validResponseText({
+            outcome: "blocked",
+            blocked_reason: "waiting on API credentials",
+          }),
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ],
+      notificationSettings: {
+        slack_webhook_url: "https://hooks.slack.com/services/T0/B0/x",
+      },
+    },
+    () => Promise.reject(new Error("Slack is down")),
+  );
+  const outcome = await summarizeSession(deps, SESSION_ID);
+  assertEquals(outcome, { status: "summarized" });
 });
 
 Deno.test("an API failure retries with backoff and leaves the old summary in place", async () => {

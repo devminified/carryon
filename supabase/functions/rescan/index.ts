@@ -14,15 +14,16 @@
 // config.toml's functions.rescan — authenticated by a shared
 // x-cron-secret header, same shape as sync-github-teams (CO-303).
 //
-// Notification beyond audit_log ("notify the project admin and the
-// developer... to rotate the key") is explicitly deferred: the ticket
-// itself says "by email or Slack once CO-409 lands" — CO-409 (Slack
-// notifications) and any email provider don't exist in this codebase
-// yet, so there is nothing real to wire up without inventing a
-// half-built channel ahead of its own ticket (CLAUDE.md: no
-// speculative scale). The audit_log row IS the real, durable,
-// queryable notification surface available today — any admin checking
-// a project's audit log sees every `rescan_hit`.
+// Notification beyond audit_log: CO-409 (Slack) has landed — a hit
+// also posts to the project's own Slack channel, via
+// project_notification_settings' slack_webhook_url, if one is
+// configured (nothing sent otherwise — see that migration's own
+// comment on why this lives in its own admin-only table rather than
+// as a column on `projects`). Email is still out of scope — no email
+// provider exists in this codebase (CLAUDE.md: no speculative scale).
+// The audit_log row stays the durable, queryable record either way —
+// Slack is a faster-but-best-effort nudge on top of it, never a
+// replacement for it.
 //
 // Batching and resumability: a chunk "needs (re)scanning" whenever
 // last_rescanned_at is null, or predates redaction_config.updated_at
@@ -56,6 +57,11 @@ import {
   decompressChunk as realDecompressChunk,
   sha256Hex as realSha256Hex,
 } from "../_shared/zstd.ts";
+import {
+  buildRescanHitMessage,
+  buildSessionUrl,
+  postToSlackWithRetry as realPostToSlackWithRetry,
+} from "../_shared/slack.ts";
 
 const Input = z.object({
   // A manual full rescan (no time window, every chunk the "needs
@@ -73,6 +79,10 @@ export interface Deps {
   decompressChunk: typeof realDecompressChunk;
   compressChunk: typeof realCompressChunk;
   sha256Hex: typeof realSha256Hex;
+  // CO-409: optional, same reasoning as summarize.ts's own
+  // SummarizeDeps.postToSlack — real callers fall back to the real
+  // Slack sender, tests inject a stub.
+  postToSlack?: typeof realPostToSlackWithRetry;
 }
 
 const defaultDeps: Deps = {
@@ -185,6 +195,23 @@ export async function handle(
     ) => [r.id, r.bucket]),
   );
 
+  const { data: notificationRows, error: notificationErr } = await admin
+    .from("project_notification_settings")
+    .select("project_id, slack_webhook_url")
+    .in("project_id", projectIDs);
+  if (notificationErr) {
+    console.error(
+      "rescan: notification settings lookup failed",
+      notificationErr.code,
+    );
+    return errorResponse(500, "internal_error");
+  }
+  const webhookByProject = new Map<string, string | null>(
+    (notificationRows ?? []).map((
+      r: { project_id: string; slack_webhook_url: string | null },
+    ) => [r.project_id, r.slack_webhook_url]),
+  );
+
   let scanned = 0;
   let hits = 0;
 
@@ -263,6 +290,17 @@ export async function handle(
           });
           if (auditErr) {
             console.error("rescan: audit log insert failed", auditErr.code);
+          }
+
+          const webhookUrl = webhookByProject.get(projectID);
+          if (webhookUrl) {
+            const sendSlack = deps.postToSlack ?? realPostToSlackWithRetry;
+            await sendSlack(
+              webhookUrl,
+              buildRescanHitMessage({
+                sessionUrl: buildSessionUrl(chunk.session_id),
+              }),
+            );
           }
         }
       } else {
