@@ -61,7 +61,7 @@ jobs:
       - name: deno fmt check
         run: deno fmt --check supabase/functions
       - name: deno test
-        run: deno test --allow-net --allow-env supabase/functions
+        run: deno test --allow-net --allow-env --allow-read supabase/functions
 
   web:
     runs-on: ubuntu-latest
