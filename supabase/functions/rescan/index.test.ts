@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert@1.0.19";
+import { assert, assertEquals } from "jsr:@std/assert@1.0.19";
 import { type Deps, handle } from "./index.ts";
 
 const CRON_SECRET = "test-cron-secret";
@@ -19,8 +19,14 @@ interface FakeState {
   chunks: ChunkRow[];
   sessions: { id: string; project_id: string }[];
   projects: { id: string; bucket: string | null }[];
+  notificationSettings: {
+    project_id: string;
+    slack_webhook_url: string | null;
+  }[];
   // deno-lint-ignore no-explicit-any
   auditLog: any[];
+  // deno-lint-ignore no-explicit-any
+  slackMessages: { webhookUrl: string; payload: any }[];
   storageObjects: Record<string, { bucket: string; bytes: Uint8Array }>;
   downloadErr?: unknown;
   updateObjErr?: unknown;
@@ -32,7 +38,9 @@ function freshState(overrides: Partial<FakeState> = {}): FakeState {
     chunks: [],
     sessions: [],
     projects: [],
+    notificationSettings: [],
     auditLog: [],
+    slackMessages: [],
     storageObjects: {},
     ...overrides,
   };
@@ -126,6 +134,19 @@ function fakeAdminClient(state: FakeState): any {
           }),
         };
       }
+      if (table === "project_notification_settings") {
+        return {
+          select: () => ({
+            in: (_col: string, ids: string[]) =>
+              Promise.resolve({
+                data: state.notificationSettings.filter((n) =>
+                  ids.includes(n.project_id)
+                ),
+                error: null,
+              }),
+          }),
+        };
+      }
       if (table === "audit_log") {
         return {
           // deno-lint-ignore no-explicit-any
@@ -183,6 +204,10 @@ function fakeDeps(state: FakeState, overrides: Partial<Deps> = {}): Deps {
     compressChunk: (data: Uint8Array) => Promise.resolve(data), // identity stand-in
     sha256Hex: (data: Uint8Array) =>
       Promise.resolve(`hash:${dec.decode(data)}`),
+    postToSlack: (webhookUrl, payload) => {
+      state.slackMessages.push({ webhookUrl, payload });
+      return Promise.resolve(true);
+    },
     ...overrides,
   };
 }
@@ -295,6 +320,88 @@ Deno.test("a chunk with a planted secret is rewritten, re-hashed, and audited", 
   assertEquals(state.auditLog[0].action, "rescan_hit");
   assertEquals(state.auditLog[0].session_id, "s1");
   assertEquals(state.auditLog[0].project_id, "p1");
+
+  // CO-409: no slack_webhook_url configured for this project (the
+  // default empty notificationSettings) — nothing sent.
+  assertEquals(state.slackMessages.length, 0);
+});
+
+Deno.test("CO-409: a hit also posts to Slack when the project has a webhook configured", async () => {
+  const objectKey = "p1/u1/s1/main/chunk-0.jsonl.zst";
+  const state = freshState({
+    chunks: [{
+      session_id: "s1",
+      stream_id: "main",
+      seq: 0,
+      object_key: objectKey,
+      uploaded_at: new Date().toISOString(),
+      last_rescanned_at: null,
+    }],
+    sessions: [{ id: "s1", project_id: "p1" }],
+    projects: [{ id: "p1", bucket: null }],
+    notificationSettings: [
+      {
+        project_id: "p1",
+        slack_webhook_url: "https://hooks.slack.com/services/T0/B0/x",
+      },
+    ],
+  });
+  putObject(
+    state,
+    "carryon-sessions",
+    objectKey,
+    `{"secret":"sb_secret_${"x".repeat(24)}"}\n`,
+  );
+
+  const res = await handle(req({}), fakeDeps(state));
+  assertEquals(await res.json(), { scanned: 1, hits: 1 });
+
+  assertEquals(state.slackMessages.length, 1);
+  assertEquals(
+    state.slackMessages[0].webhookUrl,
+    "https://hooks.slack.com/services/T0/B0/x",
+  );
+  assert(
+    state.slackMessages[0].payload.text.includes(
+      "rotate the affected credential",
+    ),
+  );
+  // Never the matched secret value itself, anywhere in the message.
+  assertEquals(
+    JSON.stringify(state.slackMessages[0].payload).includes("sb_secret_"),
+    false,
+  );
+});
+
+Deno.test("CO-409: a clean chunk (no hit) never posts to Slack even with a webhook configured", async () => {
+  const state = freshState({
+    chunks: [{
+      session_id: "s1",
+      stream_id: "main",
+      seq: 0,
+      object_key: "p1/u1/s1/main/chunk-0.jsonl.zst",
+      uploaded_at: new Date().toISOString(),
+      last_rescanned_at: null,
+    }],
+    sessions: [{ id: "s1", project_id: "p1" }],
+    projects: [{ id: "p1", bucket: null }],
+    notificationSettings: [
+      {
+        project_id: "p1",
+        slack_webhook_url: "https://hooks.slack.com/services/T0/B0/x",
+      },
+    ],
+  });
+  putObject(
+    state,
+    "carryon-sessions",
+    "p1/u1/s1/main/chunk-0.jsonl.zst",
+    '{"a":1}\n',
+  );
+
+  const res = await handle(req({}), fakeDeps(state));
+  assertEquals(await res.json(), { scanned: 1, hits: 0 });
+  assertEquals(state.slackMessages.length, 0);
 });
 
 Deno.test("CO-305: scans a project's dedicated bucket, not the shared default", async () => {

@@ -2,28 +2,23 @@
 
 Carryon's primary notification channel is **Slack** (CO-409), not email — there's no payroll-style transactional email need. Supabase Auth's built-in email (magic link, if ever enabled) is the only auth-related email; everything else is Slack, sent directly by the Edge Function that caused the event.
 
-## Slack (CO-409)
+## Slack (CO-409, as actually built)
 
-Per Doc: `summarize-session` (CO-407) calls the Slack webhook directly when a session it just summarized has outcome `blocked`, naming the session and linking to the web viewer. Coalesced naturally — only the terminal summarize call for a session triggers a message, not every chunk confirmation. Other message types (daily digest, opt-in; secret-rescan hits from CO-306 to admins) are likewise sent directly by the function that produces them. See `.claude/rules/edge-functions.md` for why there's no queue/outbox here in the current build plan.
+Per-project, optional, opt-in config lives in its own `project_notification_settings` table (`project_id`, `slack_webhook_url`, `notify_digest`) — **not** new columns on `projects`, unlike `bucket`/`daily_token_budget`. Those are readable by any viewer (`members_can_read_their_projects`); a Slack webhook URL lets its holder *post* into the team's channel, which is a materially different risk, so this table's own RLS is admin-only in every direction (select/insert/update/delete) — see `database-rls.md` and the migration's own comment. A missing row means "notifications off" for that project, not an error — every reader here treats `maybeSingle()` coming back null that way. There's no admin UI for setting this yet (CO-410's own planned page); until then it's set by hand via SQL, same manual-tuning shape `bucket`/`daily_token_budget`/`closed_at` already have.
+
+Three message types, each built by its own function in `supabase/functions/_shared/slack.ts` and sent through that file's `postToSlackWithRetry` (exponential backoff, `MAX_ATTEMPTS = 3`, never throws — a Slack outage must never break the job that triggered it):
+
+- **Blocked-session alert** — `_shared/summarize.ts`'s own `summarizeSession()` sends this itself, right after a successful write, but *only* on the transition **into** `outcome = 'blocked'` (the session's previous `outcome` wasn't already `'blocked'`) — otherwise the 30-minute cron sweep (or a CO-408 re-summarize) would re-send the same alert every time it still finds the session blocked. Named by the session's owner's GitHub login (`auth.admin.getUserById`, same lookup `list-sessions` already uses), the session's title, the blocked reason, and a link built from `WEB_APP_URL` (an Edge Function secret — see `.env.example`; the message degrades to no link, not a broken one, if it's unset).
+- **Secret-rescan hit** — `rescan/index.ts` sends one message per hit, right after its own `audit_log` insert, reusing the same project's `project_notification_settings` lookup it already does for `bucket`. Never includes the matched secret value — only "rotate the affected credential" and a session link.
+- **Daily digest (opt-in)** — a fourth scheduled Edge Function, `send-daily-digest`, same `x-cron-secret` + `pg_cron`/`net.http_post`/Vault shape as `rescan`/`sync-github-teams`/`purge-expired-sessions`/`summarize-session` (`edge-functions.md`), running once daily. Only for a project with `notify_digest = true` **and** a configured webhook — opt-in on top of the webhook, since a team that only wants blocked-session alerts shouldn't get a daily message it never asked for. Groups the last 24 hours' sessions by developer (resolved the same way as the blocked alert); a project with zero activity in the window sends nothing at all, same reasoning as "projects with notifications off send nothing" — an empty digest every day trains a team to ignore the channel.
 
 ```ts
-// supabase/functions/_shared/slack.ts
-import { z } from 'npm:zod';
-
-const NotifyInput = z.object({
-  sessionId: z.string().uuid(),
-  title: z.string(),
-  summary: z.string().max(500),
-  url: z.string().url(),
-});
-
-export async function postSessionSummary(input: z.infer<typeof NotifyInput>) {
-  const parsed = NotifyInput.parse(input);
-  await fetch(Deno.env.get('SLACK_WEBHOOK_URL')!, {
-    method: 'POST',
-    body: JSON.stringify({ text: `*${parsed.title}* ended — ${parsed.summary}\n${parsed.url}` }),
-  });
-}
+// supabase/functions/_shared/slack.ts (shape, not the full file)
+export async function postToSlackWithRetry(
+  webhookUrl: string,
+  payload: { text: string; blocks: unknown[] }, // Slack Block Kit
+  deps = defaultDeps, // real fetch + sleep; tests inject stubs
+): Promise<boolean> { /* retries, then logs and returns false — never throws */ }
 ```
 
 Never post transcript content to Slack — title, AI summary, and a link only. The summary itself is already AI-generated from redacted, condensed text (see `edge-functions.md`'s note on `summarize-session`), but Slack messages are the most widely-visible surface in the whole system, so treat them as the strictest filter, not a pass-through.

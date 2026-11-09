@@ -408,6 +408,13 @@ verify_jwt = false
 # this verify_jwt setting has no bearing on that path.
 verify_jwt = false
 
+[functions.send-daily-digest]
+# CO-409: same shape as rescan/sync-github-teams/purge-expired-sessions/
+# summarize-session above — a pg_cron job calls this via net.http_post
+# once daily, with no user JWT. Authenticated via a shared
+# x-cron-secret header (DIGEST_CRON_SECRET) instead.
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.
