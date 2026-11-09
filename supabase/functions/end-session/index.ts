@@ -19,6 +19,19 @@
 // used to get. The existence check stays on the service role so a
 // missing session is still reported as 404 rather than folded into the
 // same 403 a non-owner gets.
+//
+// CO-407: once the status update actually succeeds, this also triggers
+// the session's final AI summary — in-process, via a direct call into
+// _shared/summarize.ts's summarizeSession(), not an HTTP round trip to
+// the summarize-session Edge Function (that one exists only for its
+// own 30-minute cron sweep over *live* sessions; see its own header
+// comment). Awaited, not fire-and-forget: summarizeSession's own
+// try/catch-free design already can't throw in a way that should fail
+// this response (every real failure mode returns a status instead —
+// api_failure, invalid_response, budget_exceeded, see that module),
+// but this handler still wraps the call in its own try/catch as a
+// last line of defense, since a session ending successfully must
+// never be undone by a summarization bug.
 
 import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";
@@ -27,6 +40,12 @@ import {
   callerClient as realCallerClient,
   requireUser as realRequireUser,
 } from "../_shared/supabase.ts";
+import { callAnthropic as realCallAnthropic } from "../_shared/anthropic.ts";
+import {
+  realNow,
+  realSleep,
+  summarizeSession as realSummarizeSession,
+} from "../_shared/summarize.ts";
 
 const Input = z.object({
   sessionId: z.string().uuid(),
@@ -38,12 +57,16 @@ export interface Deps {
   adminClient: typeof realAdminClient;
   callerClient: typeof realCallerClient;
   requireUser: typeof realRequireUser;
+  callAnthropic: typeof realCallAnthropic;
+  summarizeSession: typeof realSummarizeSession;
 }
 
 const defaultDeps: Deps = {
   adminClient: realAdminClient,
   callerClient: realCallerClient,
   requireUser: realRequireUser,
+  callAnthropic: realCallAnthropic,
+  summarizeSession: realSummarizeSession,
 };
 
 export async function handle(
@@ -100,6 +123,31 @@ export async function handle(
     // RLS matched zero rows — the session exists (checked above) but
     // this caller isn't its owner.
     return errorResponse(403, "forbidden");
+  }
+
+  const anthropicApiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!anthropicApiKey) {
+    console.error(
+      "end-session: ANTHROPIC_API_KEY is not configured — skipping final summary",
+    );
+  } else {
+    try {
+      await deps.summarizeSession(
+        {
+          adminClient: admin,
+          callAnthropic: deps.callAnthropic,
+          anthropicApiKey,
+          sleep: realSleep,
+          now: realNow,
+        },
+        input.sessionId,
+      );
+    } catch (e) {
+      console.error(
+        `end-session: final summary failed for session ${input.sessionId}`,
+        e instanceof Error ? e.message : String(e),
+      );
+    }
   }
 
   return json({ ok: true }, 200);

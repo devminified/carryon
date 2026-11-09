@@ -397,6 +397,17 @@ verify_jwt = false
 # shared x-cron-secret header (PURGE_CRON_SECRET) instead.
 verify_jwt = false
 
+[functions.summarize-session]
+# CO-407: same shape as rescan/sync-github-teams/purge-expired-sessions
+# above for its own 30-minute live-session sweep — a pg_cron job calls
+# it via net.http_post, with no user JWT, authenticated via a shared
+# x-cron-secret header (SUMMARIZE_CRON_SECRET) instead. Its *other*
+# trigger — end-session, once a session ends — never goes through
+# this HTTP endpoint at all: end-session imports and calls
+# _shared/summarize.ts's summarizeSession() directly, in-process, so
+# this verify_jwt setting has no bearing on that path.
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

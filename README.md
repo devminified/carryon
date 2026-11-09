@@ -4,7 +4,7 @@ Capture every Claude Code session on a registered repo, upload it (redacted) to 
 
 See `Overview.md` for the product pitch and 52-ticket build plan, `Devminified Carryon — System Design Document (SDD).md` for the architecture and invariants, and `Carryon-TRD-Tickets.md` for the full ticket descriptions. `CLAUDE.md` and `.claude/rules/` are the binding engineering conventions for this repo.
 
-**Current status:** Phases 1–3 are complete, through `CO-308` — capture, upload, pull/resume, roles and row-level security, redaction (laptop-side plus a nightly server-side rescan backstop), the audit log, retention/deletion, GitHub-team-mirrored project roles, and fleet packaging with a signed daily auto-update channel. Phase 4 (the web app) is underway: GitHub sign-in, the project/session list, the real session viewer (chat, tool calls, diffs, redaction highlighting), the fork family tree, and rename/pin (`CO-401`–`CO-405`) are done; admin pages (`CO-410`) are next.
+**Current status:** Phases 1–3 are complete, through `CO-308` — capture, upload, pull/resume, roles and row-level security, redaction (laptop-side plus a nightly server-side rescan backstop), the audit log, retention/deletion, GitHub-team-mirrored project roles, and fleet packaging with a signed daily auto-update channel. Phase 4 (the web app) is underway: GitHub sign-in, the project/session list, the real session viewer (chat, tool calls, diffs, redaction highlighting), the fork family tree, rename/pin, the condensed-transcript builder, and the AI title/summary job (`CO-401`–`CO-407`) are done; summary display and re-run (`CO-408`) is next.
 
 ## Install
 
