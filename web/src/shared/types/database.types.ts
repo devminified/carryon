@@ -491,6 +491,43 @@ export type Database = {
     }
     Functions: {
       end_idle_sessions: { Args: never; Returns: undefined }
+      find_sessions_by_file: {
+        Args: { p_limit?: number; p_path: string; p_project_id?: string }
+        Returns: {
+          blocked_reason: string | null
+          branch: string | null
+          claude_code_version: string | null
+          embedding: string | null
+          ended_reason: string | null
+          files_touched: string[] | null
+          head_sha: string | null
+          id: string
+          last_activity_at: string
+          last_resummarize_requested_at: string | null
+          machine: string | null
+          original_cwd: string
+          outcome: string | null
+          parent_session_id: string | null
+          pinned: boolean
+          project_id: string
+          search_vector: unknown
+          started_at: string
+          status: string
+          summarized_at: string | null
+          summarized_through_seq: number | null
+          summary: string | null
+          title: string | null
+          title_source: string
+          total_bytes: number
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "sessions"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       has_role: {
         Args: {
           p_min_role: Database["public"]["Enums"]["project_role"]

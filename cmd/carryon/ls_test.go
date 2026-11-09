@@ -12,7 +12,7 @@ func TestLsCommandHasEveryFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find ls: %v", err)
 	}
-	for _, name := range []string{"project", "dev", "status", "since", "limit", "json"} {
+	for _, name := range []string{"project", "dev", "status", "since", "limit", "json", "file"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("ls command has no --%s flag", name)
 		}

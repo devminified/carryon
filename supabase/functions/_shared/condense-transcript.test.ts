@@ -170,6 +170,72 @@ Deno.test("deduplicates files touched and commands run across turns", () => {
   assertEquals(result.commandsRun, ["npm test"]);
 });
 
+// CO-502: "Paths are normalized relative to the repo root, so
+// different machines match." Two developers running the same repo
+// from different absolute locations must end up with the exact same
+// files_touched entry.
+Deno.test("CO-502: files_touched is normalized relative to the session's own cwd", () => {
+  const lines = [
+    userLine("u1", "fix the retry logic"),
+    assistantToolUseLine("a1", "toolu_1", "Edit", {
+      file_path: "/Users/ali/dev/acme-api/src/payments/webhook.ts",
+      old_string: "a",
+      new_string: "b",
+    }),
+    toolResultLine("tr1", "toolu_1", "ok"),
+  ].join("\n") + "\n";
+  const result = condenseTranscriptText(lines, "/Users/ali/dev/acme-api");
+  assertEquals(result.filesTouched, ["src/payments/webhook.ts"]);
+});
+
+Deno.test("CO-502: the same repo file normalizes identically from a second developer's own clone location", () => {
+  const lines = [
+    userLine("u1", "fix the retry logic"),
+    assistantToolUseLine("a1", "toolu_1", "Edit", {
+      file_path: "/home/sara/code/acme-api/src/payments/webhook.ts",
+      old_string: "a",
+      new_string: "b",
+    }),
+    toolResultLine("tr1", "toolu_1", "ok"),
+  ].join("\n") + "\n";
+  const result = condenseTranscriptText(lines, "/home/sara/code/acme-api");
+  assertEquals(result.filesTouched, ["src/payments/webhook.ts"]);
+});
+
+Deno.test("CO-502: a path outside cwd is left as-is — nothing else to normalize it against", () => {
+  const lines = [
+    userLine("u1", "check the global git config"),
+    assistantToolUseLine("a1", "toolu_1", "Read", {
+      file_path: "/Users/ali/.gitconfig",
+    }),
+    toolResultLine("tr1", "toolu_1", "ok"),
+  ].join("\n") + "\n";
+  const result = condenseTranscriptText(lines, "/Users/ali/dev/acme-api");
+  assertEquals(result.filesTouched, ["/Users/ali/.gitconfig"]);
+});
+
+Deno.test("CO-502: with no cwd given, files_touched is left exactly as the raw path (backward compatible)", () => {
+  const result = condenseTranscriptText(TWO_TURN_LINES);
+  assertEquals(result.filesTouched, ["/repo/webhook.ts"]);
+});
+
+Deno.test("CO-502: a Windows cwd matches case-insensitively", () => {
+  const lines = [
+    userLine("u1", "fix the retry logic"),
+    assistantToolUseLine("a1", "toolu_1", "Edit", {
+      file_path: "C:\\Users\\Ali\\dev\\acme-api\\src\\payments\\webhook.ts",
+      old_string: "a",
+      new_string: "b",
+    }),
+    toolResultLine("tr1", "toolu_1", "ok"),
+  ].join("\n") + "\n";
+  const result = condenseTranscriptText(
+    lines,
+    "c:\\users\\ali\\dev\\acme-api",
+  );
+  assertEquals(result.filesTouched, ["src/payments/webhook.ts"]);
+});
+
 Deno.test("no redacted placeholder is expanded and no secret is reintroduced", () => {
   const lines = [
     userLine("u1", "check the aws creds"),

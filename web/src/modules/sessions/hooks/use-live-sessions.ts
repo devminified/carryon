@@ -10,10 +10,11 @@ function rowMatchesFilters(row: SessionRow, filters: SessionListFilters): boolea
   if (filters.branch && row.branch !== filters.branch) return false;
   if (filters.from && row.last_activity_at < filters.from) return false;
   if (filters.to && row.last_activity_at > filters.to) return false;
-  // dev/q filters need a login lookup or full-text match this client
-  // can't do locally — a realtime row for either stays excluded rather
-  // than risk showing something the user explicitly filtered out.
-  if (filters.dev || filters.q) return false;
+  // dev/q/file filters need a login lookup, a semantic search, or a
+  // files_touched match this client can't do locally — a realtime row
+  // for any of them stays excluded rather than risk showing something
+  // the user explicitly filtered out.
+  if (filters.dev || filters.q || filters.file) return false;
   return true;
 }
 

@@ -57,6 +57,11 @@ type ListSessionsInput struct {
 	// Limit is capped and defaulted server-side if zero; see
 	// list-sessions/index.ts's DEFAULT_LIMIT.
 	Limit int
+	// File is CO-502's `--file <path>` — a path relative to the repo
+	// root (the server normalizes files_touched the same way, see
+	// condense-transcript.ts), matched as a prefix: an exact file path
+	// and a bare directory prefix both work with this one field.
+	File string
 }
 
 // SessionSummary is one row of list-sessions' response — everything
@@ -92,6 +97,9 @@ func (c *Client) ListSessions(ctx context.Context, accessToken string, in ListSe
 	}
 	if in.Limit > 0 {
 		body["limit"] = in.Limit
+	}
+	if in.File != "" {
+		body["file"] = in.File
 	}
 
 	var out struct {

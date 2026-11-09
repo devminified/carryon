@@ -229,7 +229,7 @@ func TestListSessionsSendsOnlyNonZeroFilters(t *testing.T) {
 	if gotPath != "/functions/v1/list-sessions" {
 		t.Errorf("path = %q, want /functions/v1/list-sessions", gotPath)
 	}
-	for _, key := range []string{"project", "dev", "status", "since", "limit"} {
+	for _, key := range []string{"project", "dev", "status", "since", "limit", "file"} {
 		if _, ok := gotBody[key]; ok {
 			t.Errorf("request body has unset field %q = %v, want it omitted", key, gotBody[key])
 		}
@@ -253,6 +253,7 @@ func TestListSessionsSendsEveryGivenFilter(t *testing.T) {
 		Status:  "live",
 		Since:   &since,
 		Limit:   10,
+		File:    "src/payments/webhook.ts",
 	})
 	if err != nil {
 		t.Fatalf("ListSessions() error = %v", err)
@@ -272,6 +273,9 @@ func TestListSessionsSendsEveryGivenFilter(t *testing.T) {
 	}
 	if gotBody["limit"] != float64(10) {
 		t.Errorf("limit = %v, want 10", gotBody["limit"])
+	}
+	if gotBody["file"] != "src/payments/webhook.ts" {
+		t.Errorf("file = %v, want src/payments/webhook.ts", gotBody["file"])
 	}
 }
 

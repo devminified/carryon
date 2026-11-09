@@ -29,6 +29,11 @@ const Input = z.object({
   status: z.enum(["live", "ended"]).optional(),
   since: z.string().datetime().optional(),
   limit: z.number().int().min(1).max(200).optional(),
+  // CO-502: `carryon ls --file <path>` — a path relative to the repo
+  // root (summarizeSession's own files_touched normalization, see
+  // _shared/condense-transcript.ts); matches as a prefix, so an exact
+  // file path and a bare directory prefix both work with one field.
+  file: z.string().min(1).max(4096).optional(),
 });
 
 // How many rows to pull from the database before applying the dev
@@ -93,11 +98,34 @@ export async function handle(
     ) => [p.id, p.name]),
   );
 
-  let query = caller
-    .from("sessions")
-    .select("id, project_id, user_id, branch, title, last_activity_at, status")
-    .order("last_activity_at", { ascending: false })
-    .limit(FETCH_CAP);
+  // CO-502: find_sessions_by_file (this ticket's own migration) is
+  // SECURITY INVOKER, so calling it via the caller's own client here —
+  // same as every query in this function — is what makes RLS the real
+  // scope, not a second access decision. Its own SQL already orders
+  // by last_activity_at desc and caps at FETCH_CAP, same shape as the
+  // plain query below; project/status/since still apply as additional
+  // filters layered on top, same as PostgREST lets any resource (a
+  // table or a setof-table function) be filtered.
+  // `caller` is a plain, ungenerated SupabaseClient (see
+  // _shared/supabase.ts) — same as every other query in this
+  // codebase, so there's no generated Database type disambiguating a
+  // .rpc(...).select(...) builder from a .from(...).select(...) one
+  // beyond `any`; both support the same .eq/.gte/.in/.order chain,
+  // which is all this function ever calls on it.
+  // deno-lint-ignore no-explicit-any
+  let query: any = input.file
+    ? caller
+      .rpc("find_sessions_by_file", { p_path: input.file, p_limit: FETCH_CAP })
+      .select(
+        "id, project_id, user_id, branch, title, last_activity_at, status",
+      )
+    : caller
+      .from("sessions")
+      .select(
+        "id, project_id, user_id, branch, title, last_activity_at, status",
+      )
+      .order("last_activity_at", { ascending: false })
+      .limit(FETCH_CAP);
   if (input.project) {
     const wanted = input.project.toLowerCase();
     const candidateProjectIds = (projectRows ?? [])

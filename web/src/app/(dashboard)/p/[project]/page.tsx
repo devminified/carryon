@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getProjectForCurrentUser } from '@/modules/projects/data/queries';
 import {
+  findSessionsByFile,
   listBranchesForProject,
   listDevelopersForProject,
   listSessionsForProject,
@@ -53,19 +54,28 @@ export default async function ProjectPage({
     from: sp.from,
     to: sp.to,
     q: sp.q,
+    file: sp.file,
   };
   const cursor = decodeCursor(sp.cursor);
 
-  // CO-501: a query switches the page to semantic search results —
-  // ranked by relevance, not paginated (see searchSessionsForProject's
-  // own comment) — instead of the plain, cursor-paginated project list.
+  // CO-501/CO-502: a query switches the page to semantic search
+  // results; a file filter switches it to "who touched this file"
+  // results — both ranked/matched rather than paginated (see each
+  // function's own comment), instead of the plain, cursor-paginated
+  // project list. session-filters.tsx keeps q/file mutually exclusive
+  // in the URL, so at most one of these ever applies.
   const [{ items, nextCursor }, developers, branches, role] = await Promise.all([
     filters.q
       ? searchSessionsForProject(projectId, { ...filters, q: filters.q }).then((items) => ({
           items,
           nextCursor: null,
         }))
-      : listSessionsForProject(projectId, filters, cursor),
+      : filters.file
+        ? findSessionsByFile(projectId, { ...filters, file: filters.file }).then((items) => ({
+            items,
+            nextCursor: null,
+          }))
+        : listSessionsForProject(projectId, filters, cursor),
     listDevelopersForProject(projectId),
     listBranchesForProject(projectId),
     getCurrentRole(projectId),
