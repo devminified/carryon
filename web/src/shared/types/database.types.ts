@@ -34,6 +34,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_usage: {
+        Row: {
+          cost_usd: number
+          created_at: string
+          id: number
+          input_tokens: number
+          model: string
+          output_tokens: number
+          project_id: string
+          session_id: string | null
+        }
+        Insert: {
+          cost_usd: number
+          created_at?: string
+          id?: number
+          input_tokens: number
+          model: string
+          output_tokens: number
+          project_id: string
+          session_id?: string | null
+        }
+        Update: {
+          cost_usd?: number
+          created_at?: string
+          id?: number
+          input_tokens?: number
+          model?: string
+          output_tokens?: number
+          project_id?: string
+          session_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_usage_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_usage_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_log: {
         Row: {
           action: string
@@ -141,6 +189,7 @@ export type Database = {
         Row: {
           bucket: string | null
           closed_at: string | null
+          daily_token_budget: number
           git_remote: string
           id: string
           name: string
@@ -152,6 +201,7 @@ export type Database = {
         Insert: {
           bucket?: string | null
           closed_at?: string | null
+          daily_token_budget?: number
           git_remote: string
           id?: string
           name: string
@@ -163,6 +213,7 @@ export type Database = {
         Update: {
           bucket?: string | null
           closed_at?: string | null
+          daily_token_budget?: number
           git_remote?: string
           id?: string
           name?: string
@@ -246,6 +297,7 @@ export type Database = {
       }
       sessions: {
         Row: {
+          blocked_reason: string | null
           branch: string | null
           claude_code_version: string | null
           ended_reason: string | null
@@ -262,6 +314,7 @@ export type Database = {
           search_vector: unknown
           started_at: string
           status: string
+          summarized_through_seq: number | null
           summary: string | null
           title: string | null
           title_source: string
@@ -269,6 +322,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          blocked_reason?: string | null
           branch?: string | null
           claude_code_version?: string | null
           ended_reason?: string | null
@@ -285,6 +339,7 @@ export type Database = {
           search_vector?: unknown
           started_at?: string
           status?: string
+          summarized_through_seq?: number | null
           summary?: string | null
           title?: string | null
           title_source?: string
@@ -292,6 +347,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          blocked_reason?: string | null
           branch?: string | null
           claude_code_version?: string | null
           ended_reason?: string | null
@@ -308,6 +364,7 @@ export type Database = {
           search_vector?: unknown
           started_at?: string
           status?: string
+          summarized_through_seq?: number | null
           summary?: string | null
           title?: string | null
           title_source?: string

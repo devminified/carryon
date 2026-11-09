@@ -54,7 +54,7 @@ carryon/
 │       ├── get-config/                 server-configurable redaction rule overrides (CO-301) — not in Doc's original RPC list, see edge-functions.md
 │       ├── register-snapshot/
 │       ├── sign-snapshot-bundle/       signs the upload URL for register-snapshot's git-bundle fallback (CO-202)
-│       ├── summarize-session/
+│       ├── summarize-session/           the AI title/summary job's 30-minute live-session sweep (CO-407) — its *other* trigger, end-session, calls _shared/summarize.ts directly, never through this HTTP endpoint; see edge-functions.md
 │       ├── rescan/                      nightly backstop secret scan + rewrite over recent chunks (CO-306)
 │       ├── purge-expired-sessions/      daily retention sweep for closed, past-retention projects (CO-307), supports {"dryRun": true}
 │       ├── delete-session/              carryon admin delete <sid> --reason's backend (CO-307)
@@ -64,7 +64,7 @@ carryon/
 │       ├── get-session-family/          backs the session viewer's fork family tree (CO-404) — an iterative up-then-down walk over parent_session_id, not a recursive SQL CTE; see edge-functions.md
 │       ├── rename-session/               `carryon rename <id> "<title>"`'s backend (CO-405) — the web app's own rename goes straight through a Server Action + RLS instead, see edge-functions.md
 │       ├── .env.example                 Edge Function secrets beyond Supabase's own auto-provided ones (CO-303: GITHUB_APP_*, CRON_SECRET; CO-306: RESCAN_CRON_SECRET; CO-307: PURGE_CRON_SECRET) — supabase/functions/.env (gitignored) for local dev
-│       └── _shared/                    schema validation, has_role helper, Resend/Slack clients, github.ts (GitHub App JWT + installation token + team members, CO-303), storage.ts (resolveBucket — a project's dedicated bucket, or the shared default, CO-305), redact.ts (hand-kept TS port of internal/redact's rule patterns, CO-306), zstd.ts (the one function that reads/rewrites chunk bytes directly, CO-306), transcript-schema.ts (CO-406: hand-kept TS port of the web viewer's parse-transcript.ts schema), condense-transcript.ts (CO-406: the condensed-transcript builder CO-407's summarize-session will call — see edge-functions.md)
+│       └── _shared/                    schema validation, has_role helper, Resend/Slack clients, github.ts (GitHub App JWT + installation token + team members, CO-303), storage.ts (resolveBucket — a project's dedicated bucket, or the shared default, CO-305), redact.ts (hand-kept TS port of internal/redact's rule patterns, CO-306), zstd.ts (the one function that reads/rewrites chunk bytes directly, CO-306), transcript-schema.ts (CO-406: hand-kept TS port of the web viewer's parse-transcript.ts schema), condense-transcript.ts (CO-406: the condensed-transcript builder), anthropic.ts (CO-407: the real Anthropic Messages API client, Claude Haiku), summarize.ts (CO-407: summarizeSession() — the AI title/summary job's actual logic, called from both end-session and summarize-session, see edge-functions.md)
 │
 ├── web/                                Next.js app
 │   ├── next.config.ts

@@ -17,6 +17,10 @@ was built; it isn't itself the sign-off.**
 > `admins_can_update_sessions` — the `sessions` (update) row below is
 > updated in place to reflect it, rather than left historical, since
 > it's a one-cell change to an otherwise-still-accurate table.
+>
+> **Extended (not superseded) by CO-407** ("AI title and summary job"),
+> which added the `ai_usage` table — appended as two new rows below
+> rather than a change to any existing one.
 
 Three roles per project, in ascending order: `viewer < resumer < admin`.
 "Owner" means `sessions.user_id = auth.uid()` — a developer can always
@@ -42,6 +46,8 @@ read and manage their own sessions regardless of their project role
 | `audit_log` (select/insert/update/delete) | ❌ | ❌ | ❌ | ❌ | ❌ — deliberately deferred to CO-304 (depends on this ticket); every current writer uses the service role |
 | `storage.objects` (carryon-sessions bucket, select) | ❌ | ✅ | ✅ | ❌ | n/a |
 | `storage.objects` (insert/update/delete) | ❌ | ❌ | ❌ | ❌ | ❌ — every write goes through a service-role-signed URL, never direct RLS-checked access |
+| `ai_usage` (select) | ❌ | ❌ | ✅ | ❌ | n/a — CO-407, added after this snapshot |
+| `ai_usage` (insert/update/delete) | ❌ | ❌ | ❌ | ❌ | ❌ — append-only (I2), `summarize-session`'s own service role is the only writer |
 
 ## Where the service role still legitimately bypasses RLS
 

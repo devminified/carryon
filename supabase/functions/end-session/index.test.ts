@@ -20,6 +20,11 @@ function fakeDeps(opts: {
   update?: { data?: any; error?: any };
   // deno-lint-ignore no-explicit-any
   onUpdate?: (row: any) => void;
+  // CO-407: records every summarizeSession call this handler makes —
+  // most tests here never set ANTHROPIC_API_KEY, so this never fires
+  // for them (see index.ts's own early check); the dedicated trigger
+  // test below sets the env var for its own duration and reads this.
+  onSummarize?: (sessionId: string) => void;
 }): Deps {
   const isOwner = opts.isOwner ?? true;
   return {
@@ -77,6 +82,15 @@ function fakeDeps(opts: {
         },
         // deno-lint-ignore no-explicit-any
       }) as any,
+    callAnthropic: (() =>
+      Promise.resolve({
+        text: "",
+        usage: { inputTokens: 0, outputTokens: 0 },
+      })) as Deps["callAnthropic"],
+    summarizeSession: ((_deps: unknown, sessionId: string) => {
+      opts.onSummarize?.(sessionId);
+      return Promise.resolve({ status: "summarized" as const });
+    }) as Deps["summarizeSession"],
   };
 }
 
@@ -177,4 +191,62 @@ Deno.test("surfaces an update failure as 500", async () => {
 
   const res = await handle(req(validBody()), deps);
   assertEquals(res.status, 500);
+});
+
+Deno.test("CO-407: triggers the session's final summary in-process once ANTHROPIC_API_KEY is set", async () => {
+  const prevKey = Deno.env.get("ANTHROPIC_API_KEY");
+  Deno.env.set("ANTHROPIC_API_KEY", "test-key");
+  try {
+    let summarizedSessionId: string | null = null;
+    const deps = fakeDeps({
+      user: fakeUser("u1"),
+      onSummarize: (sessionId) => {
+        summarizedSessionId = sessionId;
+      },
+    });
+
+    const res = await handle(req(validBody()), deps);
+    assertEquals(res.status, 200);
+    assertEquals(summarizedSessionId, "11111111-1111-4111-8111-111111111111");
+  } finally {
+    if (prevKey === undefined) Deno.env.delete("ANTHROPIC_API_KEY");
+    else Deno.env.set("ANTHROPIC_API_KEY", prevKey);
+  }
+});
+
+Deno.test("CO-407: a summarization failure never fails the end-session response itself", async () => {
+  const prevKey = Deno.env.get("ANTHROPIC_API_KEY");
+  Deno.env.set("ANTHROPIC_API_KEY", "test-key");
+  try {
+    const deps = fakeDeps({ user: fakeUser("u1") });
+    deps.summarizeSession = () => Promise.reject(new Error("boom"));
+
+    const res = await handle(req(validBody()), deps);
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body.ok, true);
+  } finally {
+    if (prevKey === undefined) Deno.env.delete("ANTHROPIC_API_KEY");
+    else Deno.env.set("ANTHROPIC_API_KEY", prevKey);
+  }
+});
+
+Deno.test("CO-407: skips the final summary (but still succeeds) when ANTHROPIC_API_KEY isn't configured", async () => {
+  const prevKey = Deno.env.get("ANTHROPIC_API_KEY");
+  Deno.env.delete("ANTHROPIC_API_KEY");
+  try {
+    let called = false;
+    const deps = fakeDeps({
+      user: fakeUser("u1"),
+      onSummarize: () => {
+        called = true;
+      },
+    });
+
+    const res = await handle(req(validBody()), deps);
+    assertEquals(res.status, 200);
+    assertEquals(called, false);
+  } finally {
+    if (prevKey !== undefined) Deno.env.set("ANTHROPIC_API_KEY", prevKey);
+  }
 });
