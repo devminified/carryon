@@ -4,6 +4,7 @@ import type {
   AuditLogEntry,
   HeartbeatWithLogin,
   MemberWithLogin,
+  ObservabilityDashboard,
   ProjectRow,
   ProjectWithSettings,
   RedactionConfigRow,
@@ -18,7 +19,9 @@ import type {
 // own comment for why per-project RLS can't express "manage the whole
 // fleet" at all.
 
-async function resolveLogins(userIds: string[]): Promise<Map<string, { login: string | null; email: string | null }>> {
+async function resolveLogins(
+  userIds: string[],
+): Promise<Map<string, { login: string | null; email: string | null }>> {
   const admin = createAdminClient();
   const unique = [...new Set(userIds)];
   const entries = await Promise.all(
@@ -41,7 +44,10 @@ async function resolveLogins(userIds: string[]): Promise<Map<string, { login: st
 
 export async function listAllProjects(): Promise<ProjectWithSettings[]> {
   const admin = createAdminClient();
-  const { data: projects, error } = await admin.from('projects').select('*').order('name', { ascending: true });
+  const { data: projects, error } = await admin
+    .from('projects')
+    .select('*')
+    .order('name', { ascending: true });
   if (error) throw error;
 
   const { data: settingsRows, error: settingsErr } = await admin
@@ -50,7 +56,10 @@ export async function listAllProjects(): Promise<ProjectWithSettings[]> {
   if (settingsErr) throw settingsErr;
 
   const settingsByProject = new Map(
-    (settingsRows ?? []).map((s) => [s.project_id, { slackWebhookUrl: s.slack_webhook_url, notifyDigest: s.notify_digest }]),
+    (settingsRows ?? []).map((s) => [
+      s.project_id,
+      { slackWebhookUrl: s.slack_webhook_url, notifyDigest: s.notify_digest },
+    ]),
   );
 
   return (projects as ProjectRow[]).map((p) => ({
@@ -62,7 +71,10 @@ export async function listAllProjects(): Promise<ProjectWithSettings[]> {
 
 export async function listProjectsForPicker(): Promise<Pick<ProjectRow, 'id' | 'name'>[]> {
   const admin = createAdminClient();
-  const { data, error } = await admin.from('projects').select('id, name').order('name', { ascending: true });
+  const { data, error } = await admin
+    .from('projects')
+    .select('id, name')
+    .order('name', { ascending: true });
   if (error) throw error;
   return data;
 }
@@ -103,11 +115,17 @@ export async function listAuditLog(filters: AuditLogFilters): Promise<AuditLogEn
     // — no direct "get user by email" in the admin API, and a small
     // team's user base makes this an honest MVP, not a scale risk.
     const { data: usersPage } = await admin.auth.admin.listUsers({ perPage: 1000 });
-    actorId = usersPage.users.find((u) => u.email?.toLowerCase() === filters.actorEmail!.toLowerCase())?.id ?? null;
+    actorId =
+      usersPage.users.find((u) => u.email?.toLowerCase() === filters.actorEmail!.toLowerCase())
+        ?.id ?? null;
     if (!actorId) return []; // no such user — an honest empty result, not every row
   }
 
-  let query = admin.from('audit_log').select('*').order('at', { ascending: false }).limit(AUDIT_PAGE_SIZE);
+  let query = admin
+    .from('audit_log')
+    .select('*')
+    .order('at', { ascending: false })
+    .limit(AUDIT_PAGE_SIZE);
   if (actorId) query = query.eq('actor', actorId);
   if (filters.action) query = query.eq('action', filters.action);
   if (filters.projectId) query = query.eq('project_id', filters.projectId);
@@ -120,7 +138,9 @@ export async function listAuditLog(filters: AuditLogFilters): Promise<AuditLogEn
   const actorIds = data.map((r) => r.actor).filter((a): a is string => a !== null);
   const logins = await resolveLogins(actorIds);
 
-  const projectIds = [...new Set(data.map((r) => r.project_id).filter((p): p is string => p !== null))];
+  const projectIds = [
+    ...new Set(data.map((r) => r.project_id).filter((p): p is string => p !== null)),
+  ];
   const { data: projectRows, error: projectErr } = projectIds.length
     ? await admin.from('projects').select('id, name').in('id', projectIds)
     : { data: [] as { id: string; name: string }[], error: null };
@@ -129,8 +149,8 @@ export async function listAuditLog(filters: AuditLogFilters): Promise<AuditLogEn
 
   return data.map((row) => ({
     ...row,
-    actorLogin: row.actor ? logins.get(row.actor)?.login ?? null : null,
-    projectName: row.project_id ? projectNames.get(row.project_id) ?? null : null,
+    actorLogin: row.actor ? (logins.get(row.actor)?.login ?? null) : null,
+    projectName: row.project_id ? (projectNames.get(row.project_id) ?? null) : null,
   }));
 }
 
@@ -152,7 +172,10 @@ const HEARTBEAT_STALE_AFTER_MS = 30 * 60 * 1000; // 6x the interval
 
 export async function listAgentHeartbeats(): Promise<HeartbeatWithLogin[]> {
   const admin = createAdminClient();
-  const { data, error } = await admin.from('agent_heartbeats').select('*').order('last_seen_at', { ascending: false });
+  const { data, error } = await admin
+    .from('agent_heartbeats')
+    .select('*')
+    .order('last_seen_at', { ascending: false });
   if (error) throw error;
 
   const logins = await resolveLogins(data.map((h) => h.user_id));
@@ -160,14 +183,22 @@ export async function listAgentHeartbeats(): Promise<HeartbeatWithLogin[]> {
   return data.map((h) => {
     const age = now - new Date(h.last_seen_at).getTime();
     const status: HeartbeatWithLogin['status'] =
-      age <= HEARTBEAT_ONLINE_AFTER_MS ? 'online' : age <= HEARTBEAT_STALE_AFTER_MS ? 'stale' : 'offline';
+      age <= HEARTBEAT_ONLINE_AFTER_MS
+        ? 'online'
+        : age <= HEARTBEAT_STALE_AFTER_MS
+          ? 'stale'
+          : 'offline';
     return { ...h, login: logins.get(h.user_id)?.login ?? null, status };
   });
 }
 
 export async function getRedactionConfig(): Promise<RedactionConfigRow> {
   const admin = createAdminClient();
-  const { data, error } = await admin.from('redaction_config').select('*').eq('id', 'default').maybeSingle();
+  const { data, error } = await admin
+    .from('redaction_config')
+    .select('*')
+    .eq('id', 'default')
+    .maybeSingle();
   if (error) throw error;
   // The row is seeded by CO-301's own migration — it always exists,
   // but fall back rather than throw if it's somehow missing.
@@ -180,4 +211,84 @@ export async function getRedactionConfig(): Promise<RedactionConfigRow> {
       updated_at: new Date(0).toISOString(),
     }
   );
+}
+
+const AI_COST_WINDOW_DAYS = 30;
+
+// CO-504: the /admin/dashboard page. lagP50/95 and fleetErrorRate call
+// the exact same SQL functions (lag_p50_seconds, lag_p95_seconds,
+// fleet_upload_error_rate) check-observability-alerts itself uses to
+// decide whether to fire — this ticket's own "the dashboard numbers
+// match database queries" testing point, satisfied by construction
+// rather than two independent implementations that could drift.
+export async function getObservabilityDashboard(): Promise<ObservabilityDashboard> {
+  const admin = createAdminClient();
+
+  const [
+    lagP50,
+    lagP95,
+    errorRate,
+    summarizeP50,
+    summarizeP95,
+    summarizeFailureRate,
+    storageTotals,
+    projectRows,
+    aiUsageRows,
+  ] = await Promise.all([
+    admin.rpc('lag_p50_seconds'),
+    admin.rpc('lag_p95_seconds'),
+    admin.rpc('fleet_upload_error_rate'),
+    admin.rpc('summarize_job_p50_latency_ms'),
+    admin.rpc('summarize_job_p95_latency_ms'),
+    admin.rpc('summarize_job_failure_rate'),
+    admin.rpc('project_storage_totals'),
+    admin.from('projects').select('id, name'),
+    admin
+      .from('ai_usage')
+      .select('cost_usd, created_at')
+      .gte(
+        'created_at',
+        new Date(Date.now() - AI_COST_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+      ),
+  ]);
+  if (lagP50.error) throw lagP50.error;
+  if (lagP95.error) throw lagP95.error;
+  if (errorRate.error) throw errorRate.error;
+  if (summarizeP50.error) throw summarizeP50.error;
+  if (summarizeP95.error) throw summarizeP95.error;
+  if (summarizeFailureRate.error) throw summarizeFailureRate.error;
+  if (storageTotals.error) throw storageTotals.error;
+  if (projectRows.error) throw projectRows.error;
+  if (aiUsageRows.error) throw aiUsageRows.error;
+
+  const projectNameById = new Map((projectRows.data ?? []).map((p) => [p.id, p.name]));
+  const storageByProject = (
+    (storageTotals.data ?? []) as { project_id: string; total_bytes: number }[]
+  )
+    .map((row) => ({
+      projectId: row.project_id,
+      projectName: projectNameById.get(row.project_id) ?? row.project_id,
+      totalBytes: row.total_bytes,
+    }))
+    .sort((a, b) => b.totalBytes - a.totalBytes);
+
+  const costByDate = new Map<string, number>();
+  for (const row of aiUsageRows.data ?? []) {
+    const date = row.created_at.slice(0, 10);
+    costByDate.set(date, (costByDate.get(date) ?? 0) + Number(row.cost_usd));
+  }
+  const aiCostByDay = [...costByDate.entries()]
+    .map(([date, costUsd]) => ({ date, costUsd }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  return {
+    lagP50Seconds: lagP50.data as number | null,
+    lagP95Seconds: lagP95.data as number | null,
+    fleetErrorRate: errorRate.data as number | null,
+    summarizeJobP50Ms: summarizeP50.data as number | null,
+    summarizeJobP95Ms: summarizeP95.data as number | null,
+    summarizeJobFailureRate: summarizeFailureRate.data as number | null,
+    aiCostByDay,
+    storageByProject,
+  };
 }

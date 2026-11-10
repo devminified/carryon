@@ -766,3 +766,74 @@ func TestNewValidatesRequiredFields(t *testing.T) {
 		t.Error("New() without ClientSource = nil error, want an error")
 	}
 }
+
+// CO-504: TakeCounts backs the heartbeat's own "error counts and
+// redaction counts" — a failing Upload call must still count as one
+// attempt and one error, through the real HTTP path (not just the
+// standalone counters in isolation).
+func TestTakeCountsTracksAttemptsAndErrorsAcrossRealUploadCalls(t *testing.T) {
+	backend := newFakeBackend()
+	srv := backend.server()
+	defer srv.Close()
+	u := newTestUploader(t, srv)
+
+	dir := t.TempDir()
+	okPath := filepath.Join(dir, "ok.jsonl")
+	writeTranscript(t, okPath, `{"line":1}`+"\n")
+	if err := u.Upload(context.Background(), agent.Session{ID: "ok1", TranscriptPath: okPath, ProjectID: "p1"}); err != nil {
+		t.Fatalf("Upload() error = %v", err)
+	}
+
+	okPath2 := filepath.Join(dir, "ok2.jsonl")
+	writeTranscript(t, okPath2, `{"line":1}`+"\n")
+	if err := u.Upload(context.Background(), agent.Session{ID: "ok2", TranscriptPath: okPath2, ProjectID: "p1"}); err != nil {
+		t.Fatalf("Upload() error = %v", err)
+	}
+
+	backend.failRegisterWithStatus = http.StatusForbidden
+	failPath := filepath.Join(dir, "fail.jsonl")
+	writeTranscript(t, failPath, `{"line":1}`+"\n")
+	if err := u.Upload(context.Background(), agent.Session{ID: "fail1", TranscriptPath: failPath, ProjectID: "p1"}); err == nil {
+		t.Fatal("Upload() with a failing register-chunk = nil error, want one")
+	}
+
+	attempts, errs, _ := u.TakeCounts()
+	if attempts != 3 {
+		t.Errorf("attempts = %d, want 3", attempts)
+	}
+	if errs != 1 {
+		t.Errorf("errors = %d, want 1", errs)
+	}
+
+	// Reading again without any new Upload calls in between returns
+	// zero — TakeCounts resets what it reports, same "since the last
+	// heartbeat" semantics the heartbeat loop itself relies on.
+	attempts, errs, redactions := u.TakeCounts()
+	if attempts != 0 || errs != 0 || redactions != 0 {
+		t.Errorf("TakeCounts() after an immediate second call = (%d, %d, %d), want all zero", attempts, errs, redactions)
+	}
+}
+
+func TestTakeCountsCountsRealRedactionsAppliedDuringUpload(t *testing.T) {
+	backend := newFakeBackend()
+	srv := backend.server()
+	defer srv.Close()
+	u := newTestUploader(t, srv)
+
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "s1.jsonl")
+	// A real AWS access key shape — internal/redact's own default rule
+	// set matches this, same fixture style redact_test.go's own corpus
+	// uses, so this exercises the real redactor Upload wires in, not a
+	// stubbed count.
+	writeTranscript(t, transcriptPath, `{"line":"AKIAIOSFODNN7EXAMPLE"}`+"\n")
+
+	if err := u.Upload(context.Background(), agent.Session{ID: "s1", TranscriptPath: transcriptPath, ProjectID: "p1"}); err != nil {
+		t.Fatalf("Upload() error = %v", err)
+	}
+
+	_, _, redactions := u.TakeCounts()
+	if redactions == 0 {
+		t.Error("redactions = 0, want at least one real redaction counted")
+	}
+}

@@ -42,6 +42,20 @@ async function restUpsert(table: string, body: unknown, onConflict: string) {
   if (!res.ok) throw new Error(`upsert ${table}: HTTP ${res.status} ${await res.text()}`);
 }
 
+async function restInsert(table: string, body: unknown) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+    method: 'POST',
+    headers: {
+      apikey: SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`insert ${table}: HTTP ${res.status} ${await res.text()}`);
+}
+
 async function findProjectId(name: string): Promise<string> {
   const rows = await restGet(`projects?name=eq.${name}&select=id`);
   if (rows.length === 0) throw new Error(`project ${name} not found`);
@@ -90,7 +104,14 @@ test.describe.serial('admin pages (CO-410)', () => {
   test('a non-admin gets a real 404 on every admin route', async ({ page, context }) => {
     await createDisposableNonAdminUser();
     await signInAsSeedUser(context, NON_ADMIN_EMAIL, NON_ADMIN_PASSWORD);
-    for (const path of ['/admin', '/admin/projects', '/admin/members', '/admin/audit', '/admin/agents', '/admin/config']) {
+    for (const path of [
+      '/admin',
+      '/admin/projects',
+      '/admin/members',
+      '/admin/audit',
+      '/admin/agents',
+      '/admin/config',
+    ]) {
       const res = await page.goto(path);
       expect(res?.status()).toBe(404);
     }
@@ -129,7 +150,10 @@ test.describe.serial('admin pages (CO-410)', () => {
     expect(Date.now() - startedAt).toBeLessThan(5 * 60 * 1000);
   });
 
-  test('registering the same remote twice is rejected with a clean conflict message', async ({ page, context }) => {
+  test('registering the same remote twice is rejected with a clean conflict message', async ({
+    page,
+    context,
+  }) => {
     await signInAsSeedUser(context, 'ali@devminified.com', 'password123');
     await page.goto('/admin/projects');
 
@@ -140,7 +164,10 @@ test.describe.serial('admin pages (CO-410)', () => {
     await expect(page.getByText(/already registered/)).toBeVisible();
   });
 
-  test("an admin can edit the new project's settings, and they persist across a reload", async ({ page, context }) => {
+  test("an admin can edit the new project's settings, and they persist across a reload", async ({
+    page,
+    context,
+  }) => {
     await signInAsSeedUser(context, 'ali@devminified.com', 'password123');
     await page.goto('/admin/projects');
 
@@ -149,7 +176,9 @@ test.describe.serial('admin pages (CO-410)', () => {
     await row.getByLabel('Dedicated bucket').fill('client-dedicated-bucket');
     await row.getByLabel('Retention (days after close)').fill('45');
     await row.getByLabel('Daily AI token budget').fill('50000');
-    await row.getByLabel('Slack webhook URL').fill('https://hooks.slack.com/services/T0/B0/co410e2e');
+    await row
+      .getByLabel('Slack webhook URL')
+      .fill('https://hooks.slack.com/services/T0/B0/co410e2e');
     await row.getByLabel('Daily digest').check();
     await row.getByRole('button', { name: 'Save settings' }).click();
     await expect(row.getByText('Saved.')).toBeVisible();
@@ -160,7 +189,9 @@ test.describe.serial('admin pages (CO-410)', () => {
     await expect(reloadedRow.getByLabel('Dedicated bucket')).toHaveValue('client-dedicated-bucket');
     await expect(reloadedRow.getByLabel('Retention (days after close)')).toHaveValue('45');
     await expect(reloadedRow.getByLabel('Daily AI token budget')).toHaveValue('50000');
-    await expect(reloadedRow.getByLabel('Slack webhook URL')).toHaveValue('https://hooks.slack.com/services/T0/B0/co410e2e');
+    await expect(reloadedRow.getByLabel('Slack webhook URL')).toHaveValue(
+      'https://hooks.slack.com/services/T0/B0/co410e2e',
+    );
     await expect(reloadedRow.getByLabel('Daily digest')).toBeChecked();
   });
 
@@ -170,7 +201,10 @@ test.describe.serial('admin pages (CO-410)', () => {
     await expect(page.getByRole('link', { name: 'Admin' })).toHaveCount(0);
   });
 
-  test('an admin can add a manual member override, change her role, then remove her', async ({ page, context }) => {
+  test('an admin can add a manual member override, change her role, then remove her', async ({
+    page,
+    context,
+  }) => {
     await signInAsSeedUser(context, 'ali@devminified.com', 'password123');
     const projectId = await findProjectId(NEW_PROJECT_NAME);
 
@@ -230,18 +264,40 @@ test.describe.serial('admin pages (CO-410)', () => {
     expect(csv).toContain(projectId);
   });
 
-  test("the agents page shows a seeded heartbeat with the right liveness status", async ({ page, context }) => {
+  test('the agents page shows a seeded heartbeat with the right liveness status', async ({
+    page,
+    context,
+  }) => {
     const now = new Date();
     const onlineAt = new Date(now.getTime() - 60_000).toISOString(); // 1 minute ago
     const staleAt = new Date(now.getTime() - 20 * 60_000).toISOString(); // 20 minutes ago
     await restUpsert(
       'agent_heartbeats',
-      { user_id: SARA_USER_ID, machine_id: 'e2e-online', hostname: 'saras-laptop', version: '9.9.9', blocked_sessions: 0, last_seen_at: onlineAt },
+      {
+        user_id: SARA_USER_ID,
+        machine_id: 'e2e-online',
+        hostname: 'saras-laptop',
+        version: '9.9.9',
+        blocked_sessions: 0,
+        last_seen_at: onlineAt,
+        os: 'darwin',
+        bytes_behind: 2048,
+        upload_attempts: 10,
+        upload_errors: 1,
+        redactions_applied: 3,
+      },
       'user_id,machine_id',
     );
     await restUpsert(
       'agent_heartbeats',
-      { user_id: SARA_USER_ID, machine_id: 'e2e-stale', hostname: 'saras-desktop', version: '9.9.8', blocked_sessions: 2, last_seen_at: staleAt },
+      {
+        user_id: SARA_USER_ID,
+        machine_id: 'e2e-stale',
+        hostname: 'saras-desktop',
+        version: '9.9.8',
+        blocked_sessions: 2,
+        last_seen_at: staleAt,
+      },
       'user_id,machine_id',
     );
 
@@ -250,10 +306,16 @@ test.describe.serial('admin pages (CO-410)', () => {
 
     const onlineRow = page.locator('tr').filter({ hasText: 'saras-laptop' });
     await expect(onlineRow.getByText('Online')).toBeVisible();
+    // CO-504's own new columns, on the real seeded row above.
+    await expect(onlineRow.getByText('darwin')).toBeVisible();
+    await expect(onlineRow.getByText('2.0 KB')).toBeVisible();
 
     const staleRow = page.locator('tr').filter({ hasText: 'saras-desktop' });
     await expect(staleRow.getByText('Stale')).toBeVisible();
     await expect(staleRow.getByRole('cell', { name: '2', exact: true })).toBeVisible();
+    // An older agent's row (no CO-504 fields sent yet) shows an
+    // honest "—" for OS, not a blank cell or a stale default.
+    await expect(staleRow.getByText('—').first()).toBeVisible();
   });
 
   test('a signed-in user (sara) reaches the real heartbeat Edge Function end to end, and it shows up on the Agents page', async ({
@@ -271,7 +333,12 @@ test.describe.serial('admin pages (CO-410)', () => {
         Authorization: `Bearer ${token}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ machineId: 'e2e-real-call', hostname: 'real-heartbeat-host', version: '1.0.0', blockedSessions: 0 }),
+      body: JSON.stringify({
+        machineId: 'e2e-real-call',
+        hostname: 'real-heartbeat-host',
+        version: '1.0.0',
+        blockedSessions: 0,
+      }),
     });
     expect(res.status).toBe(200);
 
@@ -280,7 +347,57 @@ test.describe.serial('admin pages (CO-410)', () => {
     await expect(page.getByText('real-heartbeat-host')).toBeVisible();
   });
 
-  test('an admin can update the redaction config, and it persists across a reload', async ({ page, context }) => {
+  test('the observability dashboard (CO-504) shows a real error rate derived from the heartbeats seeded above', async ({
+    page,
+    context,
+  }) => {
+    // Depends on test.describe.serial — the fleet-wide
+    // fleet_upload_error_rate() this page reads sums upload_attempts/
+    // upload_errors across every heartbeat row in the database,
+    // including e2e-online (10 attempts, 1 error) seeded by the first
+    // test in this file: 1/10 = 10.0%, the exact same SQL function
+    // check-observability-alerts itself would use.
+    await signInAsSeedUser(context, 'ali@devminified.com', 'password123');
+    await page.goto('/admin/dashboard');
+
+    await expect(page.getByText('Fleet upload error rate')).toBeVisible();
+    await expect(page.getByText('10.0%')).toBeVisible();
+  });
+
+  test('the observability dashboard (CO-504) shows real summary job latency and failure rate', async ({
+    page,
+    context,
+  }) => {
+    // ai_usage only ever logs a successful Anthropic call — this is
+    // the one real data source for "summary job latency and
+    // failures" (the ticket's own wording), seeded directly since
+    // nothing else in this suite drives a real summarizeSession() run.
+    await restInsert('summarize_job_runs', [
+      { status: 'summarized', duration_ms: 1000 },
+      { status: 'summarized', duration_ms: 1000 },
+      { status: 'summarized', duration_ms: 10000 },
+      { status: 'gave_up', duration_ms: 50 },
+    ]);
+
+    await signInAsSeedUser(context, 'ali@devminified.com', 'password123');
+    await page.goto('/admin/dashboard');
+
+    await expect(page.getByText('Summary job latency (p50 / p95)')).toBeVisible();
+    await expect(page.getByText('Summary job failure rate, last 24h')).toBeVisible();
+    // Only the 3 'summarized' durations count for latency (a gave_up
+    // run's own duration is dominated by whatever made it bail
+    // early, not real summarization time): percentile_cont(0.5) of
+    // [1000, 1000, 10000] = 1000ms = 1s; percentile_cont(0.95) =
+    // 9100ms, rounds to 9s. Failure rate counts gave_up over every
+    // run (3 summarized + 1 gave_up) = 25.0%.
+    await expect(page.getByText('1s / 9s')).toBeVisible();
+    await expect(page.getByText('25.0%')).toBeVisible();
+  });
+
+  test('an admin can update the redaction config, and it persists across a reload', async ({
+    page,
+    context,
+  }) => {
     await signInAsSeedUser(context, 'ali@devminified.com', 'password123');
     await page.goto('/admin/config');
 
@@ -291,8 +408,12 @@ test.describe.serial('admin pages (CO-410)', () => {
     await expect(page.getByText('Saved.')).toBeVisible();
 
     await page.reload();
-    await expect(page.getByLabel(/Disabled rule IDs/)).toHaveValue('generic-api-key\nmailgun-api-key');
-    await expect(page.getByLabel(/Extra path denylist globs/)).toHaveValue('**/co410-e2e-secrets/**');
+    await expect(page.getByLabel(/Disabled rule IDs/)).toHaveValue(
+      'generic-api-key\nmailgun-api-key',
+    );
+    await expect(page.getByLabel(/Extra path denylist globs/)).toHaveValue(
+      '**/co410-e2e-secrets/**',
+    );
     await expect(page.getByLabel(/Pinned agent version/)).toHaveValue('1.4.0');
 
     const configRows = await restGet('redaction_config?id=eq.default&select=disabled_rule_ids');

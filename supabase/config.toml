@@ -415,6 +415,13 @@ verify_jwt = false
 # x-cron-secret header (DIGEST_CRON_SECRET) instead.
 verify_jwt = false
 
+[functions.check-observability-alerts]
+# CO-504: same shape as send-daily-digest/rescan/sync-github-teams/
+# purge-expired-sessions above — a pg_cron job calls this via
+# net.http_post every 30 minutes, with no user JWT. Authenticated via
+# a shared x-cron-secret header (CHECK_ALERTS_CRON_SECRET) instead.
+verify_jwt = false
+
 [functions.record-compat-run]
 # CO-503: called by the nightly Claude Code compatibility GitHub
 # Actions workflow, not pg_cron and not a user — there's no Vault

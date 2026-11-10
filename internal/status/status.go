@@ -123,7 +123,7 @@ func Gather(ctx context.Context, backendURL string, authChecker AuthChecker, pat
 				SessionID:          s.SessionID,
 				Project:            projectLabel(ctx, s.Cwd),
 				LastUploadAt:       s.LastUploadAt,
-				BytesBehind:        bytesBehind(paths.StateDir, s.SessionID, s.TranscriptPath),
+				BytesBehind:        BytesBehind(paths.StateDir, s.SessionID, s.TranscriptPath),
 				Blocked:            s.Blocked,
 				BlockedReason:      s.BlockedReason,
 				ExcludedLargeFiles: snap.ExcludedLargeFiles,
@@ -145,13 +145,16 @@ func projectLabel(ctx context.Context, cwd string) string {
 	return remote
 }
 
-// bytesBehind cross-references a session's live transcript size against
+// BytesBehind cross-references a session's live transcript size against
 // internal/state's own persisted pointer — Agent itself never computes
 // this (it deliberately knows nothing about transcript bytes; see
 // internal/agent's package doc comment), so a fresh `carryon status`
 // process does the join independently, reading the same durable state
-// internal/upload already writes.
-func bytesBehind(stateDir, sessionID, transcriptPath string) int64 {
+// internal/upload already writes. Exported so cmd/carryon's own
+// heartbeat loop (CO-504) can aggregate the same real number across
+// every session into one "bytes behind" figure for the admin Agents
+// page, instead of a second, divergent computation.
+func BytesBehind(stateDir, sessionID, transcriptPath string) int64 {
 	info, err := os.Stat(transcriptPath)
 	if err != nil {
 		return 0

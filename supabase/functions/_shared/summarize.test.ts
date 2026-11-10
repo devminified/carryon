@@ -36,6 +36,9 @@ interface FakeOpts {
   passageCountError?: unknown;
   passageUpsertError?: unknown;
   onPassageUpsert?: (rows: Record<string, unknown>[]) => void;
+  // CO-504
+  onJobRunInsert?: (row: Record<string, unknown>) => void;
+  jobRunInsertError?: unknown;
 }
 
 // A tiny, deterministic fake — real dimensionality (384) doesn't
@@ -180,6 +183,14 @@ async function fakeAdmin(opts: FakeOpts) {
           },
         };
       }
+      if (table === "summarize_job_runs") {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            opts.onJobRunInsert?.(row);
+            return Promise.resolve({ error: opts.jobRunInsertError ?? null });
+          },
+        };
+      }
       throw new Error(`unexpected table ${table}`);
     },
     storage: {
@@ -274,6 +285,67 @@ Deno.test("writes title/summary/outcome/files_touched from a valid response", as
   // CO-501: the session-level embedding is merged into this same
   // sessions.update() call, not a second write.
   assert(Array.isArray(updated?.embedding));
+});
+
+// CO-504: every summarizeSession call records a job run, independent
+// of whether it actually summarized anything — this is what the
+// observability dashboard's "summary job latency and failures" tiles
+// read (ai_usage only ever logs a real, successful Anthropic call).
+Deno.test("CO-504: a successful run records a summarize_job_runs row with status=summarized and no reason", async () => {
+  // deno-lint-ignore no-explicit-any
+  let recorded: any = null;
+  const deps = await buildDeps({
+    chunkTexts: ["line one\n"],
+    onJobRunInsert: (row) => (recorded = row),
+  });
+  await summarizeSession(deps, SESSION_ID);
+  assertEquals(recorded?.session_id, SESSION_ID);
+  assertEquals(recorded?.status, "summarized");
+  assertEquals(recorded?.reason, null);
+  // deps.now() is a fixed clock in these tests (see buildDeps) — the
+  // real behavior (duration_ms = a real elapsed-time measurement) is
+  // what matters, not any particular nonzero value here.
+  assertEquals(recorded?.duration_ms, 0);
+});
+
+Deno.test("CO-504: a skipped run (budget exceeded) still records its own job run, with the skip reason", async () => {
+  // deno-lint-ignore no-explicit-any
+  let recorded: any = null;
+  const deps = await buildDeps({
+    usageRows: [{ input_tokens: 150_000, output_tokens: 60_000 }],
+    onJobRunInsert: (row) => (recorded = row),
+  });
+  const outcome = await summarizeSession(deps, SESSION_ID);
+  assertEquals(outcome, { status: "skipped", reason: "budget_exceeded" });
+  assertEquals(recorded?.status, "skipped");
+  assertEquals(recorded?.reason, "budget_exceeded");
+});
+
+Deno.test("CO-504: a gave-up run (API failure) still records its own job run, with the gave-up reason", async () => {
+  // deno-lint-ignore no-explicit-any
+  let recorded: any = null;
+  const deps = await buildDeps({
+    chunkTexts: ["line one\n"],
+    anthropicResponses: [
+      new Error("server error"),
+      new Error("server error"),
+      new Error("server error"),
+    ],
+    onJobRunInsert: (row) => (recorded = row),
+  });
+  const outcome = await summarizeSession(deps, SESSION_ID);
+  assertEquals(outcome, { status: "gave_up", reason: "api_failure" });
+  assertEquals(recorded?.status, "gave_up");
+  assertEquals(recorded?.reason, "api_failure");
+});
+
+Deno.test("CO-504: a failure recording the job run never surfaces as a failed summarization", async () => {
+  const deps = await buildDeps({
+    chunkTexts: ["line one\n"],
+    jobRunInsertError: { code: "XXXXX" },
+  });
+  const outcome = await summarizeSession(deps, SESSION_ID);
+  assertEquals(outcome, { status: "summarized" });
 });
 
 function userLineJsonl(uuid: string, text: string): string {

@@ -1,4 +1,5 @@
 import { formatRelativeTime } from '@/shared/lib/format/date';
+import { formatBytes } from '@/shared/lib/format/bytes';
 import type { HeartbeatWithLogin } from '../types';
 
 const STATUS_LABEL: Record<HeartbeatWithLogin['status'], string> = {
@@ -24,9 +25,17 @@ export function AgentsTable({ heartbeats }: { heartbeats: HeartbeatWithLogin[] }
         <tr className="border-border border-b text-xs font-medium">
           <th className="py-2">Developer</th>
           <th className="py-2">Machine</th>
+          <th className="py-2">OS</th>
           <th className="py-2">Version</th>
           <th className="py-2">Last check-in</th>
+          <th className="py-2">Last upload</th>
+          <th className="py-2">Bytes behind</th>
           <th className="py-2">Blocked sessions</th>
+          {/* CO-504: counts since the last heartbeat, not an all-time
+              total — see internal/upload.Uploader.TakeCounts' own
+              doc comment. */}
+          <th className="py-2">Errors</th>
+          <th className="py-2">Redactions</th>
           <th className="py-2">Status</th>
         </tr>
       </thead>
@@ -35,13 +44,22 @@ export function AgentsTable({ heartbeats }: { heartbeats: HeartbeatWithLogin[] }
           <tr key={`${h.user_id}-${h.machine_id}`} className="border-border border-b">
             <td className="py-2">{h.login ?? h.user_id}</td>
             <td className="py-2">{h.hostname}</td>
+            <td className="py-2">{h.os ?? '—'}</td>
             <td className="py-2">{h.version}</td>
             <td className="py-2" title={h.last_seen_at}>
               {formatRelativeTime(h.last_seen_at)}
             </td>
+            <td className="py-2" title={h.last_upload_at ?? undefined}>
+              {h.last_upload_at ? formatRelativeTime(h.last_upload_at) : '—'}
+            </td>
+            <td className="py-2">{formatBytes(h.bytes_behind)}</td>
             <td className="py-2">{h.blocked_sessions}</td>
+            <td className="py-2">{h.upload_errors}</td>
+            <td className="py-2">{h.redactions_applied}</td>
             <td className="py-2">
-              <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_CLASS[h.status]}`}>{STATUS_LABEL[h.status]}</span>
+              <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_CLASS[h.status]}`}>
+                {STATUS_LABEL[h.status]}
+              </span>
             </td>
           </tr>
         ))}

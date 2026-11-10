@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/devminified/carryon/internal/agent"
@@ -86,6 +87,33 @@ type Uploader struct {
 	snapshotter        Snapshotter
 	httpClient         *http.Client
 	redactConfigSource func() redact.Config
+
+	// CO-504: the heartbeat's own "error counts and redaction counts"
+	// — counted here, not in internal/agent, since this is the layer
+	// that actually knows what a redaction or an upload failure is;
+	// internal/agent's own Uploader interface (Upload(ctx, session)
+	// error) stays unchanged, so this needs no new plumbing through
+	// the scheduler or its test fakes. Atomic because Upload runs
+	// concurrently across sessions (internal/agent dispatches each
+	// session's Upload call on its own goroutine).
+	uploadAttempts    atomic.Int64
+	uploadErrors      atomic.Int64
+	redactionsApplied atomic.Int64
+}
+
+// TakeCounts returns the number of Upload calls, upload failures, and
+// individual redactions applied since the last call to TakeCounts (or
+// since New, for the first call) — CO-504's "error counts and
+// redaction counts," reported per heartbeat interval rather than as
+// an all-time total, so a recent spike is visible instead of being
+// diluted into a slowly-growing lifetime count. Atomically reads and
+// resets all three together; a heartbeat lost to a network error
+// simply drops that interval's counts rather than double-counting
+// them into the next one — acceptable for an operational signal that
+// was never meant to be a precise audit log (ai_usage is that, for
+// AI spend).
+func (u *Uploader) TakeCounts() (attempts, errors, redactions int64) {
+	return u.uploadAttempts.Swap(0), u.uploadErrors.Swap(0), u.redactionsApplied.Swap(0)
 }
 
 // New validates cfg and returns an Uploader.
@@ -131,7 +159,14 @@ func New(cfg Config) (*Uploader, error) {
 // before it reaches the caller, so Agent's retry/backoff policy sees a
 // consistent fatal-vs-retryable split regardless of which call inside
 // Upload actually failed.
-func (u *Uploader) Upload(ctx context.Context, session agent.Session) error {
+func (u *Uploader) Upload(ctx context.Context, session agent.Session) (err error) {
+	u.uploadAttempts.Add(1)
+	defer func() {
+		if err != nil {
+			u.uploadErrors.Add(1)
+		}
+	}()
+
 	if session.ProjectID == "" {
 		return fmt.Errorf("upload: session %s has no ProjectID — must be called through filter.Filter", session.ID)
 	}
@@ -365,6 +400,7 @@ func (u *Uploader) uploadChunk(ctx context.Context, session agent.Session, strea
 	}); err != nil {
 		return fmt.Errorf("confirming: %w", err)
 	}
+	u.redactionsApplied.Add(int64(redactions))
 	return nil
 }
 
