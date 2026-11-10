@@ -48,15 +48,32 @@ import (
 )
 
 const (
-	e2eAPIURL  = "http://127.0.0.1:54421"
-	e2eAnonKey = "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH"
-	e2eDBURL   = "postgresql://postgres:postgres@127.0.0.1:54422/postgres"
-
 	e2eAliEmail   = "ali@devminified.com"
 	e2eSaraEmail  = "sara@devminified.com"
 	e2ePassword   = "password123"
 	e2eSaraUserID = "22222222-2222-2222-2222-222222222222"
 )
+
+// e2eAPIURL/e2eAnonKey/e2eDBURL default to the local Supabase CLI
+// dev stack's own fixed values (`supabase start`'s well-known demo
+// keys/ports), but are overridable via env — CO-506's self-hosted
+// stack's own CI job points these at a docker-compose-run stack
+// instead, running this exact same test unmodified against it (the
+// self-host compose file's own ports/JWT_SECRET are set to match
+// these same defaults for that job specifically — see
+// .github/workflows/selfhost-e2e.yml).
+var (
+	e2eAPIURL  = envOr("E2E_API_URL", "http://127.0.0.1:54421")
+	e2eAnonKey = envOr("E2E_ANON_KEY", "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH")
+	e2eDBURL   = envOr("E2E_DB_URL", "postgresql://postgres:postgres@127.0.0.1:54422/postgres")
+)
+
+func envOr(name, fallback string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return fallback
+}
 
 // passwordGrantToken signs in as email/password directly against
 // Supabase Auth's token endpoint — the same real endpoint

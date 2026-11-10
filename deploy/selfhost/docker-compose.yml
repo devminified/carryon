@@ -1,0 +1,428 @@
+#
+# CO-506: self-hosted Carryon — a client's own Postgres/Auth/Storage/
+# Edge Runtime/Realtime (real Supabase images, the same self-hosting
+# reference architecture Supabase itself publishes, not a from-scratch
+# reimplementation) plus the Carryon web app, in one docker compose
+# file. `deploy/selfhost/init/` is the one-shot init container that
+# applies every migration under supabase/migrations/ and deploys every
+# function under supabase/functions/ against THIS stack's own Postgres
+# — the same migrations/functions this repo already ships and tests
+# against the local dev stack, not a separate self-host-only copy.
+#
+# Storage defaults to the bundled SeaweedFS service below
+# (S3-compatible, Apache-2.0) — NOT MinIO: a real `docker compose
+# up` against minio/minio and minio/mc failed with "pull access
+# denied" (MinIO gated its own Docker Hub images behind a login wall
+# in its 2024/2025 relicensing; confirmed live, not a transient
+# registry hiccup — quay.io/minio/* 401s the same way for every tag
+# tried). Point STORAGE_* at a client's own real S3 bucket instead by
+# overriding the storage service's env in an override file — see
+# README.md.
+#
+# GitHub Enterprise Server: set GITHUB_API_BASE_URL and
+# GOTRUE_EXTERNAL_GITHUB_URL (both default to github.com) — see
+# README.md's "GitHub Enterprise Server" section for what each
+# controls and the one real limitation (GoTrue's own OAuth app
+# redirect handling) found while wiring this up.
+#
+# AI provider is optional: leave ANTHROPIC_API_KEY unset and
+# summaries are skipped end to end (the backend already does this,
+# CO-407) — the web app also hides every AI-related field/tile when
+# NEXT_PUBLIC_AI_ENABLED=false (CO-506's own new signal, set by
+# install.sh/the README below based on whether a key was provided).
+
+name: carryon-selfhost
+
+services:
+  db:
+    image: supabase/postgres:15.8.1.044
+    restart: unless-stopped
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./volumes/db/init:/docker-entrypoint-initdb.d
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+      JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U supabase_admin"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  auth:
+    image: supabase/gotrue:v2.174.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres?search_path=auth,public,extensions
+      GOTRUE_SITE_URL: ${WEB_APP_URL}
+      GOTRUE_URI_ALLOW_LIST: ${WEB_APP_URL}/**,http://127.0.0.1:**
+      # A real `docker compose up` refused to start with "required key
+      # API_EXTERNAL_URL missing value" until this was added — GoTrue
+      # needs its own externally-reachable URL (through Kong) even
+      # though GOTRUE_SITE_URL/the allow-list above are also set.
+      # Deliberately NOT "GOTRUE_API_EXTERNAL_URL": confirmed by
+      # reading the real binary's own struct tags
+      # (`envconfig:"API_EXTERNAL_URL"`) — an explicit envconfig tag
+      # like this one is the full, literal env var name, overriding
+      # the GOTRUE_ prefix every *other* field here gets automatically
+      # (GOTRUE_SITE_URL, GOTRUE_JWT_SECRET, etc., which have no
+      # explicit tag and so fall back to the prefixed convention).
+      API_EXTERNAL_URL: ${SUPABASE_PUBLIC_URL}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_DISABLE_SIGNUP: "false"
+      # Defaults to off — GoTrue needs a real client id/secret to
+      # start this provider cleanly, and an operator (or a CI run with
+      # no real GitHub App) legitimately hasn't set one up yet; see
+      # auth.md's "GitHub OAuth App setup". Password-grant sign-in
+      # (every real test in this repo's own e2e suites) never needs
+      # this flag at all.
+      GOTRUE_EXTERNAL_GITHUB_ENABLED: ${GITHUB_OAUTH_ENABLED:-false}
+      GOTRUE_EXTERNAL_GITHUB_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID}
+      GOTRUE_EXTERNAL_GITHUB_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET}
+      GOTRUE_EXTERNAL_GITHUB_REDIRECT_URI: ${SUPABASE_PUBLIC_URL}/auth/v1/callback
+      # GitHub Enterprise Server — see README.md's own section on the
+      # real limitation here: GoTrue's GitHub provider authorizes and
+      # exchanges tokens against this URL, but its own user/email
+      # lookup calls are hardcoded to api.github.com in every GoTrue
+      # release checked (not configurable) — fine for GHES's own OAuth
+      # app flow (same endpoints), broken only if a GHES instance
+      # customizes its API path, which the default setup doesn't.
+      GOTRUE_EXTERNAL_GITHUB_URL: ${GITHUB_ENTERPRISE_URL:-https://github.com}
+
+  rest:
+    image: postgrest/postgrest:v12.2.3
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public,graphql_public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+
+  realtime:
+    image: supabase/realtime:v2.33.58
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Realtime's own runtime.exs config requires this (a real
+      # `docker compose up` crashed on boot with "APP_NAME not
+      # available" otherwise) — a node identifier, not anything this
+      # stack's other services reference.
+      APP_NAME: realtime
+      PORT: 4000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: postgres
+      DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
+      DB_ENC_KEY: ${REALTIME_DB_ENC_KEY}
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${REALTIME_SECRET_KEY_BASE}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      ENABLE_TAILSCALE: "false"
+      DNS_NODES: "''"
+      # The real image's own run.sh does `set -u` then tests
+      # "$RLIMIT_NOFILE" unconditionally — a real `docker compose up`
+      # crash-looped with "RLIMIT_NOFILE: unbound variable" until this
+      # was set at all (bash's nounset triggers on referencing a
+      # completely-unset var even inside a `[ ! -z ... ]` test).
+      RLIMIT_NOFILE: "10000"
+
+  # S3-compatible storage — the ticket's own "bundled default or the
+  # client's own S3" choice. SeaweedFS (Apache-2.0, actively
+  # maintained, freely pullable — see this file's header comment for
+  # why this isn't MinIO), run in its single-process "server -s3"
+  # mode: master+volume+filer+S3 gateway in one container, the
+  # closest match to how simply MinIO used to boot. Swap to a real S3
+  # bucket by overriding the `storage` service's own STORAGE_* env
+  # (region/endpoint/bucket/credentials) in an override compose file
+  # and dropping seaweedfs/storage-setup — storage-api itself speaks
+  # the same S3 API either way, so nothing else in this stack needs
+  # to change.
+  seaweedfs:
+    image: chrislusf/seaweedfs:3.97
+    restart: unless-stopped
+    entrypoint:
+      - sh
+      - -c
+      # docker compose's OWN ${VAR} interpolation (not a container-
+      # runtime envsubst/sed step — a real `docker compose up` showed
+      # why that approach doesn't work here: compose already resolves
+      # ${STORAGE_S3_ACCESS_KEY} inside this entrypoint string at
+      # parse time, before the container ever starts, so a container-
+      # side substitution step finds nothing left to substitute and
+      # silently leaves the literal placeholder text in the file —
+      # exactly what happened on first try) bakes the real values
+      # directly into this heredoc.
+      - |
+        cat > /etc/seaweedfs/s3-config.json <<'CONFIG'
+        {
+          "identities": [
+            {
+              "name": "carryon",
+              "credentials": [
+                {"accessKey": "${STORAGE_S3_ACCESS_KEY}", "secretKey": "${STORAGE_S3_SECRET_KEY}"}
+              ],
+              "actions": ["Admin", "Read", "Write"]
+            }
+          ]
+        }
+        CONFIG
+        exec weed server -dir=/data -master.port=9333 -volume.port=8080 \
+          -filer -filer.port=8888 -s3 -s3.port=8333 \
+          -s3.config=/etc/seaweedfs/s3-config.json -ip=seaweedfs
+    volumes:
+      - seaweedfs-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9333/cluster/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  storage-setup:
+    image: amazon/aws-cli:2.27.0
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      # Idempotent — head-bucket first, create only if missing, so a
+      # restart of this one-shot service never errors against an
+      # already-created bucket (matches every other idempotent step
+      # in this stack — see init/apply.sh's own comment).
+      - |
+        aws --endpoint-url http://seaweedfs:8333 --region "$STORAGE_S3_REGION" \
+          s3api head-bucket --bucket "$STORAGE_S3_BUCKET" 2>/dev/null \
+          || aws --endpoint-url http://seaweedfs:8333 --region "$STORAGE_S3_REGION" \
+               s3 mb "s3://$STORAGE_S3_BUCKET"
+    environment:
+      AWS_ACCESS_KEY_ID: ${STORAGE_S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${STORAGE_S3_SECRET_KEY}
+      STORAGE_S3_REGION: ${STORAGE_S3_REGION:-us-east-1}
+      STORAGE_S3_BUCKET: ${STORAGE_S3_BUCKET:-carryon-sessions}
+
+  storage:
+    image: supabase/storage-api:v1.19.3
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      storage-setup:
+        condition: service_completed_successfully
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      FILE_SIZE_LIMIT: 10485760
+      STORAGE_BACKEND: s3
+      REGION: ${STORAGE_S3_REGION:-us-east-1}
+      GLOBAL_S3_BUCKET: ${STORAGE_S3_BUCKET:-carryon-sessions}
+      GLOBAL_S3_ENDPOINT: ${STORAGE_S3_ENDPOINT:-http://seaweedfs:8333}
+      GLOBAL_S3_FORCE_PATH_STYLE: "true"
+      AWS_ACCESS_KEY_ID: ${STORAGE_S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${STORAGE_S3_SECRET_KEY}
+      TENANT_ID: carryon
+      IS_MULTITENANT: "false"
+      DB_INSTALL_ROLES: "false"
+    healthcheck:
+      # storage-api runs its own embedded migrations on boot
+      # (creating storage.buckets/storage.objects etc.) — the `init`
+      # container's own carryon migrations insert a default row into
+      # storage.buckets, which failed with "relation does not exist"
+      # until `init` was made to wait on this healthcheck (below),
+      # not just on Postgres itself being up.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  edge-functions:
+    image: supabase/edge-runtime:v1.74.2
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ../../supabase/functions:/home/deno/functions:ro
+      # A sibling mount, deliberately NOT nested under the read-only
+      # mount above — a real `docker compose up` failed with "read-
+      # only file system" when this router was mounted at
+      # /home/deno/functions/main (a bind mount can't create a new
+      # mountpoint inside another `:ro` mount's tree). main/index.ts's
+      # own servicePath lookups still point at /home/deno/functions/
+      # for every OTHER function, unaffected by where main itself
+      # lives.
+      - ./functions/main:/home/deno/main/main:ro
+    command:
+      - start
+      - --main-service
+      - /home/deno/main/main
+      - -p
+      - "9000"
+    environment:
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_DB_URL: postgres://supabase_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      JWT_SECRET: ${JWT_SECRET}
+      VERIFY_JWT: "true"
+      # Every Edge Function secret this repo's own .env.example
+      # documents (GITHUB_APP_*, every *_CRON_SECRET, ANTHROPIC_API_KEY,
+      # WEB_APP_URL, COMPAT_CI_*, OBSERVABILITY_SLACK_WEBHOOK_URL) is
+      # passed through from the host .env — see that file for the
+      # full list; ANTHROPIC_API_KEY left unset is what makes AI
+      # summaries an opt-in feature, not a hard requirement.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      WEB_APP_URL: ${WEB_APP_URL}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:-}
+      GITHUB_API_BASE_URL: ${GITHUB_ENTERPRISE_API_URL:-https://api.github.com}
+      CRON_SECRET: ${CRON_SECRET:-}
+      RESCAN_CRON_SECRET: ${RESCAN_CRON_SECRET:-}
+      PURGE_CRON_SECRET: ${PURGE_CRON_SECRET:-}
+      SUMMARIZE_CRON_SECRET: ${SUMMARIZE_CRON_SECRET:-}
+      DIGEST_CRON_SECRET: ${DIGEST_CRON_SECRET:-}
+      CHECK_ALERTS_CRON_SECRET: ${CHECK_ALERTS_CRON_SECRET:-}
+      COMPAT_CI_SECRET: ${COMPAT_CI_SECRET:-}
+      COMPAT_CI_SLACK_WEBHOOK_URL: ${COMPAT_CI_SLACK_WEBHOOK_URL:-}
+      OBSERVABILITY_SLACK_WEBHOOK_URL: ${OBSERVABILITY_SLACK_WEBHOOK_URL:-}
+
+  # The one API gateway every client talks to — routes /auth, /rest,
+  # /storage, /realtime, /functions to the services above, same role
+  # Kong plays in Supabase's own cloud architecture. kong.yml is this
+  # stack's own declarative config, checked in next to this file.
+  kong:
+    image: kong:3.6
+    restart: unless-stopped
+    depends_on:
+      - auth
+      - rest
+      - realtime
+      - storage
+      - edge-functions
+    entrypoint:
+      - sh
+      - -c
+      # Kong's own declarative-config loader has no env-var
+      # interpolation of its own (it's a plain YAML parse), so
+      # ANON_KEY/SERVICE_ROLE_KEY are substituted into a real temp
+      # file first. Plain `sed`, not `envsubst` — a real
+      # `docker compose up` failed with "envsubst: not found" (this
+      # image's Alpine base has no gettext package installed, same
+      # real finding as seaweedfs's own entrypoint comment). The real
+      # values are baked in by docker compose's OWN ${VAR}
+      # interpolation at parse time (same fix as seaweedfs) — `$$` is
+      # compose's escape for a literal `$`, so `\$$ANON_KEY` survives
+      # compose untouched as `\$ANON_KEY`, and the container's own
+      # shell then un-escapes that backslash, leaving the literal
+      # 9-character pattern `$ANON_KEY` for sed to match against
+      # kong.yml's own placeholder text.
+      - |
+        sed -e "s|\$$ANON_KEY|${ANON_KEY}|g" -e "s|\$$SERVICE_ROLE_KEY|${SERVICE_ROLE_KEY}|g" \
+          /home/kong/kong.yml > /tmp/kong.yml
+        exec /docker-entrypoint.sh kong docker-start
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /tmp/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+    volumes:
+      - ./kong.yml:/home/kong/kong.yml:ro
+    ports:
+      - "${KONG_HTTP_PORT:-8000}:8000"
+
+  # The one-shot migration/function-deploy step — see
+  # deploy/selfhost/init/apply.sh's own comment for exactly what it
+  # runs. Always safe to re-run (every migration under
+  # supabase/migrations/ is
+  # already idempotent/append-only by this repo's own convention —
+  # database-rls.md — and the Supabase CLI's own migration history
+  # table skips whatever's already applied), which is what makes an
+  # upgrade from version N to N+1 of this stack keep all data: nothing
+  # here ever drops or resets anything, only applies what's new.
+  init:
+    build: ./init
+    depends_on:
+      db:
+        condition: service_healthy
+      # storage-api's own embedded migrations create storage.buckets
+      # before this container's own migrations try to insert a
+      # default row into it — a real `docker compose up` failed with
+      # "relation storage.buckets does not exist" when init only
+      # waited on db/kong.
+      storage:
+        condition: service_healthy
+      kong:
+        condition: service_started
+    volumes:
+      - ../../supabase:/workspace/supabase:ro
+    environment:
+      DB_URL: postgres://supabase_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+    restart: "no"
+
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/selfhost/web.Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
+        NEXT_PUBLIC_AI_ENABLED: ${AI_ENABLED:-false}
+    restart: unless-stopped
+    depends_on:
+      - kong
+      - init
+    environment:
+      NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      # CO-506: the one new signal the web app didn't need before —
+      # every AI-related field (the admin dashboard's cost/latency
+      # tiles, the Re-summarize button, the AI-generated summary
+      # badge copy) is hidden when this is "false", set by
+      # install.sh/the operator based on whether ANTHROPIC_API_KEY was
+      # actually provided, not inferred at runtime from the key's own
+      # presence (the key lives server-side only, in edge-functions'
+      # own env — the browser bundle never sees it either way).
+      NEXT_PUBLIC_AI_ENABLED: ${AI_ENABLED:-false}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    healthcheck:
+      # Backs the install guide's own "did it actually come up"
+      # step (README.md) — /api/health (CO-506) checks the web app
+      # can really reach its own database, not just that the Next.js
+      # process is listening.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  db-data:
+  seaweedfs-data:

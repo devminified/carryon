@@ -8,6 +8,7 @@ import { PinButton } from './pin-button';
 import { ResummarizeButton } from './resummarize-button';
 import { formatRelativeTime } from '@/shared/lib/format/date';
 import { formatBytes } from '@/shared/lib/format/bytes';
+import { AI_ENABLED } from '@/shared/lib/ai-enabled';
 import { LIVE_ACTIVITY_WINDOW_MS, type SessionListFilters, type SessionListItem } from '../types';
 
 export function SessionTable({
@@ -95,7 +96,7 @@ export function SessionTable({
                       )}
                     </span>
                   )}
-                  {isAdmin && (
+                  {isAdmin && AI_ENABLED && (
                     <>
                       {s.summary && <span>·</span>}
                       <ResummarizeButton sessionId={s.id} projectId={projectId} />
