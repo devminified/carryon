@@ -8,6 +8,8 @@ Commands: `install`, `uninstall`, `login`, `hook`, `agent`, `status`, `logs`, `l
 
 `admin` is a command group, not a single RPC-backed command — `admin project add <name> <remote>` (register-project) and `admin delete <session-id> --reason` (CO-307's delete-session) so far. Each subcommand still follows the same thin-`RunE` rule; the group just gives related admin actions one discoverable namespace instead of a flat list of top-level verbs.
 
+`debug` (CO-503) is the one `Hidden: true` command group — not listed in the commands above because it never appears in `carryon --help` for a real developer. It exists purely to support the nightly Claude Code compatibility workflow's own script (`.github/scripts/claude-compat-check.sh`) and local debugging: `debug encode-path <path>` is a pure, read-only wrapper around `internal/claudepath.Encode` (CO-209), with nothing else added to this group unless a future ticket genuinely needs it — not a general-purpose escape hatch.
+
 ## The hook path is latency-critical (I1, NFR-01)
 
 `internal/hook` must hit p99 under 50ms and **always exit 0**, even on error — a non-zero exit or a slow hook blocks the developer's Claude Code session. Any error the hook hits (can't open the queue file, disk full) gets logged and swallowed, never surfaced to the caller. Don't add anything to this path that can block: no network calls, no synchronous disk flush beyond the append itself.

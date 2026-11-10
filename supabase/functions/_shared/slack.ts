@@ -137,6 +137,26 @@ export function buildRescanHitMessage(input: {
   return { text, blocks: [mrkdwn(`⚠️ ${text}${link}`)] };
 }
 
+// CO-503: this is Carryon's own team notification (the nightly
+// workflow's own run, not a per-project event) — never routed through
+// project_notification_settings' own webhook lookup, a separate
+// COMPAT_CI_SLACK_WEBHOOK_URL secret instead (see record-compat-run's
+// own doc comment).
+export function buildCompatCIFailureMessage(input: {
+  carryonVersion: string;
+  claudeCodeVersion: string;
+  versionLabel: "pinned" | "latest";
+  os: string;
+  failureReason: string | null;
+  runUrl: string | null;
+}): SlackPayload {
+  const text =
+    `Claude Code compatibility CI failed: ${input.carryonVersion} vs. ${input.versionLabel} Claude Code ${input.claudeCodeVersion} on ${input.os}`;
+  const reason = input.failureReason ? `\n${input.failureReason}` : "";
+  const link = input.runUrl ? ` <${input.runUrl}|View run>` : "";
+  return { text, blocks: [mrkdwn(`🔴 ${text}${reason}${link}`)] };
+}
+
 export interface DigestEntry {
   developerLogin: string;
   sessionCount: number;

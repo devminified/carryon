@@ -145,6 +145,42 @@ export type Database = {
         }
         Relationships: []
       }
+      claude_compat_runs: {
+        Row: {
+          carryon_version: string
+          claude_code_version: string
+          failure_reason: string | null
+          id: number
+          os: string
+          passed: boolean
+          ran_at: string
+          unknown_line_types: string[]
+          version_label: string
+        }
+        Insert: {
+          carryon_version: string
+          claude_code_version: string
+          failure_reason?: string | null
+          id?: number
+          os: string
+          passed: boolean
+          ran_at?: string
+          unknown_line_types?: string[]
+          version_label: string
+        }
+        Update: {
+          carryon_version?: string
+          claude_code_version?: string
+          failure_reason?: string | null
+          id?: number
+          os?: string
+          passed?: boolean
+          ran_at?: string
+          unknown_line_types?: string[]
+          version_label?: string
+        }
+        Relationships: []
+      }
       code_snapshots: {
         Row: {
           head_sha: string

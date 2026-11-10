@@ -1,0 +1,68 @@
+# CO-503: Claude Code compatibility CI.
+#
+# Deliberately workflow_dispatch-only for now, not a real nightly
+# schedule — this workflow spends real Anthropic API credits on every
+# run (6 jobs: 3 OSes x {pinned, latest} Claude Code), and needs a real
+# ANTHROPIC_API_KEY / COMPAT_CI_SECRET / RECORD_RUN_URL configured as
+# repository secrets before it can do anything useful. Once those are
+# set and the team has watched a few manual dispatches go green, flip
+# this on for real by uncommenting the `schedule:` trigger below.
+#
+# schedule:
+#   - cron: '0 7 * * *' # ~midnight Pacific
+
+name: claude-compat-nightly
+
+on:
+  workflow_dispatch:
+    inputs:
+      carryon_ref:
+        description: "Git ref to check out and test (branch, tag, or SHA)"
+        required: false
+        default: "main"
+      pinned_claude_code_version:
+        description: "The team's pinned Claude Code version (npm version, e.g. 2.1.263)"
+        required: true
+      carryon_version:
+        description: "Version string to record this run under (e.g. a release tag like v0.4.0) — this is what the admin pinned-version gate matches against"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  compat:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+        version_label: [pinned, latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.carryon_ref }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - uses: supabase/setup-cli@v3
+        with:
+          version: latest
+
+      - name: run the compatibility check
+        shell: bash
+        env:
+          CLAUDE_CODE_VERSION: ${{ matrix.version_label == 'pinned' && inputs.pinned_claude_code_version || 'latest' }}
+          VERSION_LABEL: ${{ matrix.version_label }}
+          OS_LABEL: ${{ matrix.os }}
+          CARRYON_VERSION: ${{ inputs.carryon_version }}
+          ANTHROPIC_API_KEY: ${{ secrets.COMPAT_CI_ANTHROPIC_API_KEY }}
+          RECORD_RUN_URL: ${{ secrets.COMPAT_CI_RECORD_RUN_URL }}
+          COMPAT_CI_SECRET: ${{ secrets.COMPAT_CI_SECRET }}
+        run: .github/scripts/claude-compat-check.sh

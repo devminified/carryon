@@ -12,6 +12,7 @@ import {
   updateProjectSettingsSchema,
   updateRedactionConfigSchema,
 } from '../schemas';
+import { isCompatClean } from '../lib/compat';
 
 export type AdminActionState = { error?: string; success?: boolean } | null;
 
@@ -219,6 +220,30 @@ export async function updateRedactionConfigAction(_prev: AdminActionState, formD
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input' };
 
   const admin = createAdminClient();
+
+  // CO-503: "admins can't move the pinned version to a version
+  // without a green run" — clearing the pin (null) is always allowed,
+  // since that only loosens a safety ceiling (internal/update's
+  // ShouldUpdate); setting a real version requires a passing nightly
+  // compatibility run across every OS and Claude Code version the
+  // workflow's own matrix covers.
+  if (parsed.data.pinnedVersion !== null) {
+    const { data: compatRows, error: compatErr } = await admin
+      .from('claude_compat_runs')
+      .select('os, version_label')
+      .eq('carryon_version', parsed.data.pinnedVersion)
+      .eq('passed', true);
+    if (compatErr) return { error: compatErr.message };
+    const clean = isCompatClean(
+      (compatRows ?? []).map((r) => ({ os: r.os, versionLabel: r.version_label })),
+    );
+    if (!clean) {
+      return {
+        error: `${parsed.data.pinnedVersion} has no green Claude Code compatibility run yet across every OS and Claude Code version — see the nightly compatibility workflow.`,
+      };
+    }
+  }
+
   const { error } = await admin
     .from('redaction_config')
     .update({
