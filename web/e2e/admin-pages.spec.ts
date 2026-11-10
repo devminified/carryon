@@ -301,4 +301,20 @@ test.describe.serial('admin pages (CO-410)', () => {
     await page.goto('/admin/audit');
     await expect(page.getByRole('cell', { name: 'config_change' })).toBeVisible();
   });
+
+  test('an admin cannot pin a version with no green Claude Code compatibility run (CO-503)', async ({
+    page,
+    context,
+  }) => {
+    await signInAsSeedUser(context, 'ali@devminified.com', 'password123');
+    await page.goto('/admin/config');
+
+    await page.getByLabel(/Pinned agent version/).fill('9.9.9-no-compat-run');
+    await page.getByRole('button', { name: 'Save config' }).click();
+
+    await expect(page.getByText(/no green Claude Code compatibility run/)).toBeVisible();
+
+    const configRows = await restGet('redaction_config?id=eq.default&select=pinned_version');
+    expect(configRows[0].pinned_version).not.toBe('9.9.9-no-compat-run');
+  });
 });

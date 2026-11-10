@@ -39,3 +39,25 @@ on conflict (id) do nothing;
 insert into projects (id, name, git_remote)
 values ('44444444-4444-4444-4444-444444444444', 'co402-no-access', 'github.com/devminified/co402-no-access')
 on conflict (id) do nothing;
+
+-- CO-503: admin-pages.spec.ts's own "an admin can update the
+-- redaction config" test sets pinnedVersion to '1.4.0' — the new
+-- compat-run gate (web/src/modules/admin/data/actions.ts) now
+-- requires a green run for every os/versionLabel combination before
+-- that write succeeds, so this fixture provides exactly that. Guarded
+-- by "where not exists", same reasoning as the deterministic-id
+-- comment above: this script re-runs on every pnpm test:e2e without a
+-- db reset in between, and claude_compat_runs has no natural unique
+-- key of its own (a real nightly re-run legitimately gets its own new
+-- historical row) to hang an "on conflict do nothing" off of.
+insert into claude_compat_runs (carryon_version, claude_code_version, version_label, os, passed)
+select '1.4.0', cc_version, cc_label, run_os, true
+from (values
+  ('2.1.263', 'pinned', 'macos-latest'),
+  ('2.1.321', 'latest', 'macos-latest'),
+  ('2.1.263', 'pinned', 'ubuntu-latest'),
+  ('2.1.321', 'latest', 'ubuntu-latest'),
+  ('2.1.263', 'pinned', 'windows-latest'),
+  ('2.1.321', 'latest', 'windows-latest')
+) as fixture(cc_version, cc_label, run_os)
+where not exists (select 1 from claude_compat_runs where carryon_version = '1.4.0');

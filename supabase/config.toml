@@ -415,6 +415,16 @@ verify_jwt = false
 # x-cron-secret header (DIGEST_CRON_SECRET) instead.
 verify_jwt = false
 
+[functions.record-compat-run]
+# CO-503: called by the nightly Claude Code compatibility GitHub
+# Actions workflow, not pg_cron and not a user — there's no Vault
+# bridge to coordinate here (pg_cron's own SQL needs Vault because it
+# can't read a plain env secret directly; a GitHub Actions runner can
+# just hold the secret itself). Authenticated via a shared
+# x-ci-secret header (COMPAT_CI_SECRET) instead, same "no caller JWT"
+# shape as every other cron-secret function above.
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

@@ -6,6 +6,7 @@ carryon/
 ├── README.md
 ├── go.mod / go.sum
 ├── .github/workflows/                  CI, release, nightly compat test
+├── .github/scripts/                    claude-compat-check.sh (CO-503) — one matrix leg of claude-compat-nightly.yml's own script, kept out of the YAML for readability; see testing.md's "Nightly compatibility test" section
 │
 ├── .claude/
 │   └── rules/                          detailed rules, imported by CLAUDE.md
@@ -67,6 +68,7 @@ carryon/
 │       ├── send-daily-digest/            opt-in once-daily per-developer digest, one Slack message per opted-in project (CO-409); see edge-functions.md and notifications.md
 │       ├── heartbeat/                    the agent's own periodic check-in, backing the admin "Agents" page (CO-410) — runs as the caller, upserts agent_heartbeats; see edge-functions.md
 │       ├── search/                       semantic (hybrid vector + full-text) session search backing the web app's search box (CO-501) — embeds the query, then calls `search_sessions` via the CALLER's own client so RLS is the real enforcement; see edge-functions.md
+│       ├── record-compat-run/            the nightly Claude Code compatibility workflow's own result sink (CO-503) — service role, authenticated by a shared x-ci-secret header (no Vault bridge — the caller is GitHub Actions, not pg_cron); see edge-functions.md
 │       ├── .env.example                 Edge Function secrets beyond Supabase's own auto-provided ones (CO-303: GITHUB_APP_*, CRON_SECRET; CO-306: RESCAN_CRON_SECRET; CO-307: PURGE_CRON_SECRET; CO-409: DIGEST_CRON_SECRET, WEB_APP_URL) — supabase/functions/.env (gitignored) for local dev
 │       └── _shared/                    schema validation, has_role helper, github.ts (GitHub App JWT + installation token + team members, CO-303), storage.ts (resolveBucket — a project's dedicated bucket, or the shared default, CO-305), redact.ts (hand-kept TS port of internal/redact's rule patterns, CO-306), zstd.ts (the one function that reads/rewrites chunk bytes directly, CO-306), transcript-schema.ts (CO-406: hand-kept TS port of the web viewer's parse-transcript.ts schema), condense-transcript.ts (CO-406: the condensed-transcript builder), anthropic.ts (CO-407: the real Anthropic Messages API client, Claude Haiku), summarize.ts (CO-407: summarizeSession() — the AI title/summary job's actual logic, called from end-session, summarize-session, and resummarize-session, see edge-functions.md), slack.ts (CO-409: postToSlackWithRetry + the three Block Kit message builders — the one shared Slack-sending primitive, see notifications.md), embed.ts (CO-501: embedText() — wraps Supabase's own built-in gte-small model via Supabase.ai.Session, see docs/co-501-embedding-choice.md), supabase-ai.d.ts (CO-501: the ambient Supabase.ai.Session type declaration deno check needs — real only inside the deployed edge runtime, undefined under deno test)
 │
@@ -104,6 +106,7 @@ carryon/
 │       │       ├── data/queries.ts     every read here runs on the service-role client (createAdminClient()) — requireGlobalAdmin() already ran first, see auth.md
 │       │       ├── data/actions.ts     registerProjectAction, updateProjectSettingsAction, add/update/removeMember*Action, updateRedactionConfigAction — every one logs its own audit_log row (logAdminAction)
 │       │       ├── lib/csv.ts          auditLogToCsv() — the one place in the whole app that needs CSV, three lines of RFC 4180 escaping, no library
+│       │       ├── lib/compat.ts       isCompatClean() (CO-503) — the pure os/versionLabel-matching logic behind "admins can't pin a version with no green Claude Code compat run"; data/actions.ts's updateRedactionConfigAction calls it after fetching claude_compat_runs
 │       │       └── ui/                 admin-nav.tsx, admin-page-shell.tsx (a plain component, not a layout.tsx — see its own doc comment), register-project-form.tsx, project-settings-form.tsx, members-table.tsx, add-member-form.tsx, audit-filters.tsx (a plain GET <form>, no client JS), audit-table.tsx, agents-table.tsx, redaction-config-form.tsx
 │       ├── shared/
 │       │   ├── constants/{roles.ts, routes.ts}
