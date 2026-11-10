@@ -53,6 +53,14 @@ env:
   REALTIME_SECRET_KEY_BASE: 2TxtnHNCMcBm2lPsrQ2r6uiCg6DOkmaRC5HuK9AzUm5p9Z8SMu1XwkTgdqwwrWBo
   STORAGE_S3_ACCESS_KEY: carryonciaccesskey
   STORAGE_S3_SECRET_KEY: carryonci0000000000secretkey00000000000
+  # A real CI run failed with 'Invalid bucket name ""' — these two
+  # have docker-compose.yml's own `${VAR:-default}` fallback, but a
+  # GitHub Actions job env block apparently doesn't leave an unlisted
+  # var references vars genuinely unset in a way that fallback
+  # reliably sees (found the hard way, not assumed); setting them
+  # explicitly here is the real fix either way.
+  STORAGE_S3_REGION: us-east-1
+  STORAGE_S3_BUCKET: carryon-sessions
   GITHUB_OAUTH_ENABLED: "false"
   AI_ENABLED: "false"
 
