@@ -18,10 +18,15 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
 	-- GoTrue's own embedded migrations (not anything in this repo)
 	-- hardcode "grant ... to postgres with grant option" — found by a
 	-- real `docker compose up` failing auth's startup migration with
-	-- "role \"postgres\" does not exist" otherwise. Just needs to
-	-- exist as a valid grant target; nothing in this stack connects
-	-- as it.
-	create role postgres;
+	-- "role \"postgres\" does not exist" otherwise. Made a real login
+	-- superuser (not just a grant target) so this repo's own existing
+	-- local-dev tooling that hardcodes a "postgres"/$POSTGRES_PASSWORD
+	-- connection (supabase/seed.sql's own CI invocation, web/package.json's
+	-- seed:e2e script) keeps working unmodified against this stack too —
+	-- found genuinely necessary by a real CI run failing exactly that
+	-- connection with "password authentication failed for user
+	-- \"postgres\"" otherwise.
+	create role postgres superuser login password '$POSTGRES_PASSWORD';
 
 	create role anon nologin noinherit;
 	create role authenticated nologin noinherit;
