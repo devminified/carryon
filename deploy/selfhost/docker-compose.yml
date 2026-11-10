@@ -190,7 +190,17 @@ services:
     volumes:
       - seaweedfs-data:/data
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9333/cluster/status"]
+      # A plain TCP check (busybox nc -z) on the S3 gateway port
+      # (8333), not just the master's own /cluster/status (9333) — a
+      # real CI run raced ahead of the filer/S3 gateway finishing
+      # their own startup (master-leader-election-dependent) and
+      # storage-setup hit "Could not connect to the endpoint URL"
+      # even though the master already reported healthy. Not `wget`:
+      # confirmed directly that a bare unauthenticated GET against
+      # the S3 API returns 403 and busybox wget treats any non-2xx as
+      # a failure, which would make a wget-based healthcheck never
+      # pass at all.
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8333"]
       interval: 5s
       timeout: 5s
       retries: 30
