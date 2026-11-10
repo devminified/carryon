@@ -1,5 +1,5 @@
 import { formatBytes } from '@/shared/lib/format/bytes';
-import { formatRate, formatSeconds } from '../lib/format-observability';
+import { formatMillis, formatRate, formatSeconds } from '../lib/format-observability';
 import type { ObservabilityDashboard } from '../types';
 
 // A plain numbers-and-tables page, no charting library — CLAUDE.md's
@@ -24,9 +24,23 @@ export function ObservabilityDashboardView({ dashboard }: { dashboard: Observabi
           </div>
         </div>
         <div className="border-border rounded border p-4">
-          <div className="text-muted-foreground text-xs">AI cost, last 24h</div>
+          <div className="text-muted-foreground text-xs">
+            AI cost, most recent day with usage
+          </div>
           <div className="text-foreground mt-1 text-lg font-semibold">
             ${(dashboard.aiCostByDay[0]?.costUsd ?? 0).toFixed(2)}
+          </div>
+        </div>
+        <div className="border-border rounded border p-4">
+          <div className="text-muted-foreground text-xs">Summary job latency (p50 / p95)</div>
+          <div className="text-foreground mt-1 text-lg font-semibold">
+            {formatMillis(dashboard.summarizeJobP50Ms)} / {formatMillis(dashboard.summarizeJobP95Ms)}
+          </div>
+        </div>
+        <div className="border-border rounded border p-4">
+          <div className="text-muted-foreground text-xs">Summary job failure rate, last 24h</div>
+          <div className="text-foreground mt-1 text-lg font-semibold">
+            {formatRate(dashboard.summarizeJobFailureRate)}
           </div>
         </div>
       </div>

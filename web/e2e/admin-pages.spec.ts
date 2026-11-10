@@ -42,6 +42,20 @@ async function restUpsert(table: string, body: unknown, onConflict: string) {
   if (!res.ok) throw new Error(`upsert ${table}: HTTP ${res.status} ${await res.text()}`);
 }
 
+async function restInsert(table: string, body: unknown) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+    method: 'POST',
+    headers: {
+      apikey: SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`insert ${table}: HTTP ${res.status} ${await res.text()}`);
+}
+
 async function findProjectId(name: string): Promise<string> {
   const rows = await restGet(`projects?name=eq.${name}&select=id`);
   if (rows.length === 0) throw new Error(`project ${name} not found`);
@@ -348,6 +362,36 @@ test.describe.serial('admin pages (CO-410)', () => {
 
     await expect(page.getByText('Fleet upload error rate')).toBeVisible();
     await expect(page.getByText('10.0%')).toBeVisible();
+  });
+
+  test('the observability dashboard (CO-504) shows real summary job latency and failure rate', async ({
+    page,
+    context,
+  }) => {
+    // ai_usage only ever logs a successful Anthropic call — this is
+    // the one real data source for "summary job latency and
+    // failures" (the ticket's own wording), seeded directly since
+    // nothing else in this suite drives a real summarizeSession() run.
+    await restInsert('summarize_job_runs', [
+      { status: 'summarized', duration_ms: 1000 },
+      { status: 'summarized', duration_ms: 1000 },
+      { status: 'summarized', duration_ms: 10000 },
+      { status: 'gave_up', duration_ms: 50 },
+    ]);
+
+    await signInAsSeedUser(context, 'ali@devminified.com', 'password123');
+    await page.goto('/admin/dashboard');
+
+    await expect(page.getByText('Summary job latency (p50 / p95)')).toBeVisible();
+    await expect(page.getByText('Summary job failure rate, last 24h')).toBeVisible();
+    // Only the 3 'summarized' durations count for latency (a gave_up
+    // run's own duration is dominated by whatever made it bail
+    // early, not real summarization time): percentile_cont(0.5) of
+    // [1000, 1000, 10000] = 1000ms = 1s; percentile_cont(0.95) =
+    // 9100ms, rounds to 9s. Failure rate counts gave_up over every
+    // run (3 summarized + 1 gave_up) = 25.0%.
+    await expect(page.getByText('1s / 9s')).toBeVisible();
+    await expect(page.getByText('25.0%')).toBeVisible();
   });
 
   test('an admin can update the redaction config, and it persists across a reload', async ({

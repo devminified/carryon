@@ -34,7 +34,7 @@ function withWebhook(url: string | undefined, fn: () => Promise<void>) {
 
 type RpcName =
   | "project_storage_totals"
-  | "has_stale_agent_on_a_workday"
+  | "stale_agents_on_a_workday"
   | "lag_p95_seconds"
   | "fleet_upload_error_rate"
   | "abnormal_storage_growth_project_ids";
@@ -42,15 +42,17 @@ type RpcName =
 // The real `observability_alert_state` table is read two different
 // ways in index.ts: a single alert's current state
 // (.eq("alert_key", key).maybeSingle()) and the full list of
-// currently-firing storage_growth:* keys
-// (.eq("is_firing", true).like("alert_key", "storage_growth:%")).
-// This fake's .eq() branches on which column it was given, same as
-// a real Postgres planner would just answer either query — simpler
-// than two separate fakes.
+// currently-firing alert keys under a given prefix
+// (.eq("is_firing", true).like("alert_key", "<prefix>:%")), once for
+// stale_agent:* and once for storage_growth:*. This fake's .eq()
+// branches on which column it was given, and its .like() branches on
+// the prefix, same as a real Postgres planner would just answer
+// either query — simpler than three separate fakes.
 function fakeDeps(opts: {
   rpc?: Partial<Record<RpcName, { data?: unknown; error?: unknown }>>;
   existingAlertState?: Record<string, boolean>; // alert_key -> is_firing
   firingGrowthAlertKeys?: string[];
+  firingStaleAgentAlertKeys?: string[];
   onAlertStateWrite?: (row: Record<string, unknown>) => void;
   onSnapshotUpsert?: (row: Record<string, unknown>) => void;
   onPostToSlack?: (summary: string) => void;
@@ -66,7 +68,7 @@ function fakeDeps(opts: {
           if (override) return Promise.resolve(override);
           const defaults: Record<RpcName, { data: unknown; error: null }> = {
             project_storage_totals: { data: [], error: null },
-            has_stale_agent_on_a_workday: { data: false, error: null },
+            stale_agents_on_a_workday: { data: [], error: null },
             lag_p95_seconds: { data: 0, error: null },
             fleet_upload_error_rate: { data: 0, error: null },
             abnormal_storage_growth_project_ids: { data: [], error: null },
@@ -98,15 +100,18 @@ function fakeDeps(opts: {
                           }),
                       };
                     }
-                    // col === "is_firing" — the growth-alerts listing path
+                    // col === "is_firing" — one of the two "currently
+                    // firing under this prefix" listing paths.
                     return {
-                      like: (_c: string, _pattern: string) =>
-                        Promise.resolve({
-                          data: (opts.firingGrowthAlertKeys ?? []).map((k) => ({
-                            alert_key: k,
-                          })),
+                      like: (_c: string, pattern: string) => {
+                        const keys = pattern.startsWith("stale_agent")
+                          ? opts.firingStaleAgentAlertKeys ?? []
+                          : opts.firingGrowthAlertKeys ?? [];
+                        return Promise.resolve({
+                          data: keys.map((k) => ({ alert_key: k })),
                           error: null,
-                        }),
+                        });
+                      },
                     };
                   },
                 };
@@ -132,6 +137,19 @@ function fakeDeps(opts: {
   };
 }
 
+function staleAgentRow(
+  overrides: Partial<
+    { user_id: string; machine_id: string; hostname: string }
+  > = {},
+) {
+  return {
+    user_id: "11111111-1111-4111-8111-111111111111",
+    machine_id: "m1",
+    hostname: "alis-macbook",
+    ...overrides,
+  };
+}
+
 Deno.test("rejects non-POST", async () => {
   const res = await handle(
     new Request("http://local", { method: "GET" }),
@@ -154,18 +172,21 @@ Deno.test("rejects every request when CHECK_ALERTS_CRON_SECRET isn't configured 
 });
 
 Deno.test(
-  "a stale agent fires once on the false -> true transition",
+  "a stale agent fires once on the false -> true transition, naming the machine",
   withCronSecret(
     withWebhook("https://hooks.slack.com/services/test", async () => {
       let posted = "";
       const res = await handle(
         req(),
         fakeDeps({
-          rpc: { has_stale_agent_on_a_workday: { data: true, error: null } },
+          rpc: {
+            stale_agents_on_a_workday: { data: [staleAgentRow()], error: null },
+          },
           onPostToSlack: (summary) => (posted = summary),
         }),
       );
       assertEquals(res.status, 200);
+      assertEquals(posted.includes("alis-macbook"), true);
       assertEquals(posted.includes("24 hours"), true);
     }),
   ),
@@ -176,11 +197,17 @@ Deno.test(
   withCronSecret(
     withWebhook("https://hooks.slack.com/services/test", async () => {
       let slackCalled = false;
+      const row = staleAgentRow();
       const res = await handle(
         req(),
         fakeDeps({
-          rpc: { has_stale_agent_on_a_workday: { data: true, error: null } },
-          existingAlertState: { stale_agent: true },
+          rpc: { stale_agents_on_a_workday: { data: [row], error: null } },
+          existingAlertState: {
+            [`stale_agent:${row.user_id}:${row.machine_id}`]: true,
+          },
+          firingStaleAgentAlertKeys: [
+            `stale_agent:${row.user_id}:${row.machine_id}`,
+          ],
           onPostToSlack: () => (slackCalled = true),
         }),
       );
@@ -191,27 +218,52 @@ Deno.test(
 );
 
 Deno.test(
-  "an alert that clears (true -> false) updates state but never posts to Slack",
+  "a stale agent that recovers (true -> false) clears its own alert without posting",
   withCronSecret(
     withWebhook("https://hooks.slack.com/services/test", async () => {
       let slackCalled = false;
-      let wroteFiringFalse = false;
+      let clearedKey = "";
+      const row = staleAgentRow();
+      const key = `stale_agent:${row.user_id}:${row.machine_id}`;
       const res = await handle(
         req(),
         fakeDeps({
-          rpc: { has_stale_agent_on_a_workday: { data: false, error: null } },
-          existingAlertState: { stale_agent: true },
+          rpc: { stale_agents_on_a_workday: { data: [], error: null } },
+          existingAlertState: { [key]: true },
+          firingStaleAgentAlertKeys: [key],
           onPostToSlack: () => (slackCalled = true),
           onAlertStateWrite: (row) => {
-            if (row.alert_key === "stale_agent" && row.is_firing === false) {
-              wroteFiringFalse = true;
-            }
+            if (row.is_firing === false) clearedKey = row.alert_key as string;
           },
         }),
       );
       assertEquals(res.status, 200);
       assertEquals(slackCalled, false);
-      assertEquals(wroteFiringFalse, true);
+      assertEquals(clearedKey, key);
+    }),
+  ),
+);
+
+Deno.test(
+  "two different agents going stale at once each get their own alert key",
+  withCronSecret(
+    withWebhook("https://hooks.slack.com/services/test", async () => {
+      const posted: string[] = [];
+      const rowA = staleAgentRow({ machine_id: "m-a", hostname: "a-laptop" });
+      const rowB = staleAgentRow({ machine_id: "m-b", hostname: "b-laptop" });
+      const res = await handle(
+        req(),
+        fakeDeps({
+          rpc: {
+            stale_agents_on_a_workday: { data: [rowA, rowB], error: null },
+          },
+          onPostToSlack: (summary) => posted.push(summary),
+        }),
+      );
+      assertEquals(res.status, 200);
+      assertEquals(posted.length, 2);
+      assertEquals(posted.some((p) => p.includes("a-laptop")), true);
+      assertEquals(posted.some((p) => p.includes("b-laptop")), true);
     }),
   ),
 );
@@ -387,7 +439,7 @@ Deno.test(
         req(),
         fakeDeps({
           rpc: {
-            has_stale_agent_on_a_workday: {
+            stale_agents_on_a_workday: {
               data: null,
               error: { code: "XXXXX" },
             },
@@ -407,13 +459,18 @@ Deno.test(
   withCronSecret(async () => {
     let slackCalled = false;
     let wroteFiringTrue = false;
+    const row = staleAgentRow();
     const res = await handle(
       req(),
       fakeDeps({
-        rpc: { has_stale_agent_on_a_workday: { data: true, error: null } },
+        rpc: { stale_agents_on_a_workday: { data: [row], error: null } },
         onPostToSlack: () => (slackCalled = true),
-        onAlertStateWrite: (row) => {
-          if (row.alert_key === "stale_agent" && row.is_firing === true) {
+        onAlertStateWrite: (writtenRow) => {
+          if (
+            writtenRow.alert_key ===
+              `stale_agent:${row.user_id}:${row.machine_id}` &&
+            writtenRow.is_firing === true
+          ) {
             wroteFiringTrue = true;
           }
         },

@@ -82,6 +82,9 @@ function fakeDeps(opts: {
               }),
             };
           }
+          if (table === "summarize_job_runs") {
+            return { insert: () => Promise.resolve({ error: null }) };
+          }
           throw new Error(`unexpected table ${table}`);
         },
         // deno-lint-ignore no-explicit-any

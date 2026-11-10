@@ -589,6 +589,41 @@ export type Database = {
           },
         ]
       }
+      summarize_job_runs: {
+        Row: {
+          created_at: string
+          duration_ms: number
+          id: number
+          reason: string | null
+          session_id: string | null
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          duration_ms: number
+          id?: number
+          reason?: string | null
+          session_id?: string | null
+          status: string
+        }
+        Update: {
+          created_at?: string
+          duration_ms?: number
+          id?: number
+          reason?: string | null
+          session_id?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "summarize_job_runs_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -641,7 +676,6 @@ export type Database = {
         }
         Returns: boolean
       }
-      has_stale_agent_on_a_workday: { Args: never; Returns: boolean }
       is_any_project_admin: { Args: never; Returns: boolean }
       lag_p50_seconds: { Args: never; Returns: number }
       lag_p95_seconds: { Args: never; Returns: number }
@@ -666,10 +700,21 @@ export type Database = {
           session_id: string
         }[]
       }
+      stale_agents_on_a_workday: {
+        Args: never
+        Returns: {
+          hostname: string
+          machine_id: string
+          user_id: string
+        }[]
+      }
       storage_object_project_id: {
         Args: { object_name: string }
         Returns: string
       }
+      summarize_job_failure_rate: { Args: never; Returns: number }
+      summarize_job_p50_latency_ms: { Args: never; Returns: number }
+      summarize_job_p95_latency_ms: { Args: never; Returns: number }
     }
     Enums: {
       project_role: "viewer" | "resumer" | "admin"

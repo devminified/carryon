@@ -154,35 +154,81 @@ export async function handle(
 
   await snapshotStorage(admin, deps.today());
 
-  const [stale, p95, errorRate, growingProjectIds, firingGrowthAlerts] =
-    await Promise.all([
-      admin.rpc("has_stale_agent_on_a_workday"),
-      admin.rpc("lag_p95_seconds"),
-      admin.rpc("fleet_upload_error_rate"),
-      admin.rpc("abnormal_storage_growth_project_ids"),
-      admin.from("observability_alert_state").select("alert_key").eq(
-        "is_firing",
-        true,
-      ).like(
-        "alert_key",
-        "storage_growth:%",
-      ),
-    ]);
+  const [
+    stale,
+    p95,
+    errorRate,
+    growingProjectIds,
+    firingGrowthAlerts,
+    firingStaleAgentAlerts,
+  ] = await Promise.all([
+    admin.rpc("stale_agents_on_a_workday"),
+    admin.rpc("lag_p95_seconds"),
+    admin.rpc("fleet_upload_error_rate"),
+    admin.rpc("abnormal_storage_growth_project_ids"),
+    admin.from("observability_alert_state").select("alert_key").eq(
+      "is_firing",
+      true,
+    ).like(
+      "alert_key",
+      "storage_growth:%",
+    ),
+    admin.from("observability_alert_state").select("alert_key").eq(
+      "is_firing",
+      true,
+    ).like(
+      "alert_key",
+      "stale_agent:%",
+    ),
+  ]);
 
-  if (stale.error) {
+  // Per-machine, same set-difference shape as storage_growth below —
+  // the ticket's own wording is "an agent hasn't checked in," i.e. a
+  // specific one, not a single fleet-wide boolean (see
+  // stale_agents_on_a_workday's own migration comment for why that
+  // mattered enough to fix).
+  if (stale.error || firingStaleAgentAlerts.error) {
     console.error(
-      "check-observability-alerts: has_stale_agent_on_a_workday failed",
-      stale.error.code,
+      "check-observability-alerts: stale agent check failed",
+      stale.error?.code ?? firingStaleAgentAlerts.error?.code,
     );
   } else {
-    await applyAlertTransition(
-      admin,
-      deps.postToSlack,
-      webhookUrl,
-      "stale_agent",
-      stale.data === true,
-      "An agent hasn't checked in for 24 hours on a workday.",
+    interface StaleAgentRow {
+      user_id: string;
+      machine_id: string;
+      hostname: string;
+    }
+    const nowStale = (stale.data ?? []) as StaleAgentRow[];
+    const nowStaleKeys = new Set(
+      nowStale.map((r) => `${r.user_id}:${r.machine_id}`),
     );
+    const previouslyFiring = new Set(
+      ((firingStaleAgentAlerts.data ?? []) as { alert_key: string }[]).map(
+        (r) => r.alert_key.slice("stale_agent:".length),
+      ),
+    );
+    for (const row of nowStale) {
+      await applyAlertTransition(
+        admin,
+        deps.postToSlack,
+        webhookUrl,
+        `stale_agent:${row.user_id}:${row.machine_id}`,
+        true,
+        `${row.hostname} hasn't checked in for 24 hours on a workday.`,
+      );
+    }
+    for (const key of previouslyFiring) {
+      if (!nowStaleKeys.has(key)) {
+        await applyAlertTransition(
+          admin,
+          deps.postToSlack,
+          webhookUrl,
+          `stale_agent:${key}`,
+          false,
+          "",
+        );
+      }
+    }
   }
 
   if (p95.error) {

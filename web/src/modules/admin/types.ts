@@ -51,6 +51,12 @@ export type ObservabilityDashboard = {
   lagP50Seconds: number | null;
   lagP95Seconds: number | null;
   fleetErrorRate: number | null;
+  // CO-504: the summary job's own latency/failure rate — independent
+  // of ai_usage (which only ever logs a successful Anthropic call,
+  // never a skip or a failure), over the last 24 hours.
+  summarizeJobP50Ms: number | null;
+  summarizeJobP95Ms: number | null;
+  summarizeJobFailureRate: number | null;
   aiCostByDay: { date: string; costUsd: number }[];
   storageByProject: { projectId: string; projectName: string; totalBytes: number }[];
 };

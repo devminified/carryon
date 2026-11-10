@@ -231,6 +231,48 @@ export async function summarizeSession(
   deps: SummarizeDeps,
   sessionId: string,
 ): Promise<SummarizeOutcome> {
+  const startedAt = deps.now();
+  const outcome = await summarizeSessionCore(deps, sessionId);
+  await recordJobRun(
+    deps,
+    sessionId,
+    outcome,
+    deps.now().getTime() - startedAt.getTime(),
+  );
+  return outcome;
+}
+
+// CO-504: one row per summarizeSession call (skipped, gave up, or a
+// real success), independent of ai_usage (which only ever logs a
+// successful Anthropic call, never a failure or a skip) — this is
+// what the observability dashboard's "summary job latency and
+// failures" tiles actually read. Best-effort: a logging failure here
+// is reported but never turns a real summarization outcome into an
+// error of its own.
+async function recordJobRun(
+  deps: SummarizeDeps,
+  sessionId: string,
+  outcome: SummarizeOutcome,
+  durationMs: number,
+): Promise<void> {
+  const { error } = await deps.adminClient.from("summarize_job_runs").insert({
+    session_id: sessionId,
+    status: outcome.status,
+    reason: "reason" in outcome ? outcome.reason : null,
+    duration_ms: Math.max(0, Math.round(durationMs)),
+  });
+  if (error) {
+    console.error(
+      `summarizeSession: recording the job run failed for session ${sessionId}`,
+      error.code,
+    );
+  }
+}
+
+async function summarizeSessionCore(
+  deps: SummarizeDeps,
+  sessionId: string,
+): Promise<SummarizeOutcome> {
   const { data: session, error: sessionErr } = await deps.adminClient
     .from("sessions")
     .select(

@@ -224,10 +224,23 @@ const AI_COST_WINDOW_DAYS = 30;
 export async function getObservabilityDashboard(): Promise<ObservabilityDashboard> {
   const admin = createAdminClient();
 
-  const [lagP50, lagP95, errorRate, storageTotals, projectRows, aiUsageRows] = await Promise.all([
+  const [
+    lagP50,
+    lagP95,
+    errorRate,
+    summarizeP50,
+    summarizeP95,
+    summarizeFailureRate,
+    storageTotals,
+    projectRows,
+    aiUsageRows,
+  ] = await Promise.all([
     admin.rpc('lag_p50_seconds'),
     admin.rpc('lag_p95_seconds'),
     admin.rpc('fleet_upload_error_rate'),
+    admin.rpc('summarize_job_p50_latency_ms'),
+    admin.rpc('summarize_job_p95_latency_ms'),
+    admin.rpc('summarize_job_failure_rate'),
     admin.rpc('project_storage_totals'),
     admin.from('projects').select('id, name'),
     admin
@@ -241,6 +254,9 @@ export async function getObservabilityDashboard(): Promise<ObservabilityDashboar
   if (lagP50.error) throw lagP50.error;
   if (lagP95.error) throw lagP95.error;
   if (errorRate.error) throw errorRate.error;
+  if (summarizeP50.error) throw summarizeP50.error;
+  if (summarizeP95.error) throw summarizeP95.error;
+  if (summarizeFailureRate.error) throw summarizeFailureRate.error;
   if (storageTotals.error) throw storageTotals.error;
   if (projectRows.error) throw projectRows.error;
   if (aiUsageRows.error) throw aiUsageRows.error;
@@ -269,6 +285,9 @@ export async function getObservabilityDashboard(): Promise<ObservabilityDashboar
     lagP50Seconds: lagP50.data as number | null,
     lagP95Seconds: lagP95.data as number | null,
     fleetErrorRate: errorRate.data as number | null,
+    summarizeJobP50Ms: summarizeP50.data as number | null,
+    summarizeJobP95Ms: summarizeP95.data as number | null,
+    summarizeJobFailureRate: summarizeFailureRate.data as number | null,
     aiCostByDay,
     storageByProject,
   };

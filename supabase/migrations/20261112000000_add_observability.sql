@@ -101,20 +101,27 @@ create policy "any_project_admin_can_read_alert_state" on observability_alert_st
 -- still revoked from public below since they're an internal
 -- implementation detail, not an API surface).
 
--- Fires when any agent hasn't checked in for 24h, but only counts on
--- a workday (Mon-Fri) — a stale weekend check-in is expected, not an
--- incident; checking isodow of "now" (when the check itself runs)
--- rather than of last_seen_at, since the alert is about "is this
--- worth paging someone about right now."
-create or replace function has_stale_agent_on_a_workday()
-returns boolean
+-- Every agent that hasn't checked in for 24h, but only on a workday
+-- (Mon-Fri) — a stale weekend check-in is expected, not an incident;
+-- checking isodow of "now" (when the check itself runs) rather than
+-- of last_seen_at, since the alert is about "is this worth paging
+-- someone about right now." Returns a SET, one row per stale machine
+-- (not a single fleet-wide boolean) — the ticket's own wording is "an
+-- agent hasn't checked in," i.e. a specific one, and
+-- check-observability-alerts needs the machine/hostname/developer to
+-- actually say which one in its own Slack message, same per-key
+-- transition shape storage_growth already uses below (an empty set
+-- on a non-workday, or when nothing is stale, both correctly mean
+-- "no alerts right now").
+create or replace function stale_agents_on_a_workday()
+returns table (user_id uuid, machine_id text, hostname text)
 language sql
 stable
 as $$
-  select extract(isodow from now()) between 1 and 5
-    and exists (
-      select 1 from agent_heartbeats where last_seen_at < now() - interval '24 hours'
-    );
+  select h.user_id, h.machine_id, h.hostname
+  from agent_heartbeats h
+  where extract(isodow from now()) between 1 and 5
+    and h.last_seen_at < now() - interval '24 hours';
 $$;
 
 -- p95 lag across the fleet's current heartbeat snapshot, in seconds —
@@ -176,21 +183,32 @@ as $$
   from agent_heartbeats;
 $$;
 
--- Project IDs whose storage grew abnormally between yesterday's and
--- today's snapshot — both an absolute floor (500MB) and a relative
--- one (50% day-over-day) have to be crossed, so a tiny project's
--- ordinary noise never fires this; both thresholds are a documented,
--- concrete choice, not a derived constant — tune them in a new
--- migration if the real fleet's own data says otherwise.
+-- Project IDs whose storage grew abnormally since their own most
+-- recent PRIOR snapshot — both an absolute floor (500MB) and a
+-- relative one (50% growth since that snapshot) have to be crossed,
+-- so a tiny project's ordinary noise never fires this; both
+-- thresholds are a documented, concrete choice, not a derived
+-- constant — tune them in a new migration if the real fleet's own
+-- data says otherwise. Deliberately the most recent snapshot strictly
+-- before today, not "exactly yesterday": if check-observability-
+-- alerts misses a day (a Slack outage, a deploy, anything), the
+-- comparison still has a real baseline to work from instead of
+-- silently finding no row and never detecting the growth across that
+-- gap at all.
 create or replace function abnormal_storage_growth_project_ids()
 returns setof uuid
 language sql
 stable
 as $$
-  select t.project_id
+  select distinct t.project_id
   from storage_snapshots t
-  join storage_snapshots y
-    on y.project_id = t.project_id and y.snapshotted_at = t.snapshotted_at - 1
+  cross join lateral (
+    select y.total_bytes
+    from storage_snapshots y
+    where y.project_id = t.project_id and y.snapshotted_at < t.snapshotted_at
+    order by y.snapshotted_at desc
+    limit 1
+  ) y
   where t.snapshotted_at = current_date
     and t.total_bytes - y.total_bytes > 500000000
     and y.total_bytes > 0
@@ -224,8 +242,8 @@ $$;
 -- workday();` 42501s.
 revoke execute on function project_storage_totals() from public;
 grant execute on function project_storage_totals() to service_role;
-revoke execute on function has_stale_agent_on_a_workday() from public;
-grant execute on function has_stale_agent_on_a_workday() to service_role;
+revoke execute on function stale_agents_on_a_workday() from public;
+grant execute on function stale_agents_on_a_workday() to service_role;
 revoke execute on function lag_p95_seconds() from public;
 grant execute on function lag_p95_seconds() to service_role;
 revoke execute on function lag_p50_seconds() from public;
@@ -235,7 +253,83 @@ grant execute on function fleet_upload_error_rate() to service_role;
 revoke execute on function abnormal_storage_growth_project_ids() from public;
 grant execute on function abnormal_storage_growth_project_ids() to service_role;
 
--- 6. check-observability-alerts — same pg_cron + net.http_post +
+-- 6. summarize_job_runs — one row per summarizeSession() call
+-- (_shared/summarize.ts's own thin wrapper), independent of ai_usage
+-- (which only ever logs a successful Anthropic call, never a skip or
+-- a failure) — this is what backs the ticket's own "summary job
+-- latency and failures" dashboard tile. Append-only (I2); no
+-- insert/update/delete policy for anyone but the service role, same
+-- shape as ai_usage itself.
+create table summarize_job_runs (
+  id bigserial primary key,
+  session_id uuid references sessions on delete set null,
+  status text not null check (status in ('summarized', 'skipped', 'gave_up')),
+  reason text,
+  duration_ms bigint not null,
+  created_at timestamptz not null default now()
+);
+
+alter table summarize_job_runs enable row level security;
+
+grant select, insert, update, delete on summarize_job_runs to anon, authenticated;
+grant select, insert, update, delete on summarize_job_runs to service_role;
+
+create index summarize_job_runs_created_at_idx on summarize_job_runs (created_at);
+
+create policy "any_project_admin_can_read_summarize_job_runs" on summarize_job_runs
+  for select to authenticated
+  using (is_any_project_admin());
+
+-- Latency, over the last 24 hours, counting only real 'summarized'
+-- runs — a skip or a gave-up call's own duration isn't "how long does
+-- a summary take," it's dominated by whatever made it bail early.
+create or replace function summarize_job_p50_latency_ms()
+returns double precision
+language sql
+stable
+as $$
+  select percentile_cont(0.5) within group (order by duration_ms)
+  from summarize_job_runs
+  where status = 'summarized' and created_at > now() - interval '24 hours';
+$$;
+
+create or replace function summarize_job_p95_latency_ms()
+returns double precision
+language sql
+stable
+as $$
+  select percentile_cont(0.95) within group (order by duration_ms)
+  from summarize_job_runs
+  where status = 'summarized' and created_at > now() - interval '24 hours';
+$$;
+
+-- Failure rate over the last 24 hours — 'gave_up' over every run
+-- (including 'skipped', since the dashboard's own question is "how
+-- often does a real attempt not land," and a skip is still a run
+-- that happened). Null, not 0, when there have been no runs at all
+-- in the window, same "no data" vs. "a real 0%" distinction
+-- fleet_upload_error_rate already makes.
+create or replace function summarize_job_failure_rate()
+returns double precision
+language sql
+stable
+as $$
+  select case when count(*) > 0
+    then count(*) filter (where status = 'gave_up')::double precision / count(*)
+    else null
+  end
+  from summarize_job_runs
+  where created_at > now() - interval '24 hours';
+$$;
+
+revoke execute on function summarize_job_p50_latency_ms() from public;
+grant execute on function summarize_job_p50_latency_ms() to service_role;
+revoke execute on function summarize_job_p95_latency_ms() from public;
+grant execute on function summarize_job_p95_latency_ms() to service_role;
+revoke execute on function summarize_job_failure_rate() from public;
+grant execute on function summarize_job_failure_rate() to service_role;
+
+-- 7. check-observability-alerts — same pg_cron + net.http_post +
 -- Vault shape as send-daily-digest/rescan/sync-github-teams/
 -- purge-expired-sessions (edge-functions.md's "scheduled Edge
 -- Functions" section) — a human has to set this secret to match the

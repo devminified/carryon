@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatRate, formatSeconds } from './format-observability';
+import { formatMillis, formatRate, formatSeconds } from './format-observability';
 
 describe('formatSeconds', () => {
   it('reports null as "No data yet", not 0s', () => {
@@ -30,5 +30,19 @@ describe('formatRate', () => {
 
   it('formats exactly zero as 0.0%, not "No data yet"', () => {
     expect(formatRate(0)).toBe('0.0%');
+  });
+});
+
+describe('formatMillis', () => {
+  it('reports null as "No data yet", not 0s', () => {
+    expect(formatMillis(null)).toBe('No data yet');
+  });
+
+  it('formats under a minute (in ms) in seconds', () => {
+    expect(formatMillis(45_000)).toBe('45s');
+  });
+
+  it('formats a minute or more (in ms) in whole minutes', () => {
+    expect(formatMillis(125_000)).toBe('2m');
   });
 });
