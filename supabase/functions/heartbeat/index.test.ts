@@ -107,3 +107,52 @@ Deno.test("surfaces an upsert failure as 500", async () => {
   );
   assertEquals(res.status, 500);
 });
+
+// CO-504
+Deno.test("an older agent binary with none of the new fields still upserts, with honest defaults", async () => {
+  // deno-lint-ignore no-explicit-any
+  let upserted: any = null;
+  const res = await handle(
+    req(VALID_BODY),
+    fakeDeps({ user: fakeUser(), onUpsert: (row) => (upserted = row) }),
+  );
+  assertEquals(res.status, 200);
+  assertEquals(upserted?.os, null);
+  assertEquals(upserted?.bytes_behind, 0);
+  assertEquals(upserted?.last_upload_at, null);
+  assertEquals(upserted?.upload_attempts, 0);
+  assertEquals(upserted?.upload_errors, 0);
+  assertEquals(upserted?.redactions_applied, 0);
+});
+
+Deno.test("passes through every CO-504 field when the agent sends them", async () => {
+  // deno-lint-ignore no-explicit-any
+  let upserted: any = null;
+  const res = await handle(
+    req({
+      ...VALID_BODY,
+      os: "darwin",
+      bytesBehind: 1536,
+      lastUploadAt: "2026-11-10T12:00:00Z",
+      uploadAttempts: 10,
+      uploadErrors: 1,
+      redactionsApplied: 3,
+    }),
+    fakeDeps({ user: fakeUser(), onUpsert: (row) => (upserted = row) }),
+  );
+  assertEquals(res.status, 200);
+  assertEquals(upserted?.os, "darwin");
+  assertEquals(upserted?.bytes_behind, 1536);
+  assertEquals(upserted?.last_upload_at, "2026-11-10T12:00:00Z");
+  assertEquals(upserted?.upload_attempts, 10);
+  assertEquals(upserted?.upload_errors, 1);
+  assertEquals(upserted?.redactions_applied, 3);
+});
+
+Deno.test("rejects a non-ISO-datetime lastUploadAt", async () => {
+  const res = await handle(
+    req({ ...VALID_BODY, lastUploadAt: "not-a-date" }),
+    fakeDeps({ user: fakeUser() }),
+  );
+  assertEquals(res.status, 400);
+});

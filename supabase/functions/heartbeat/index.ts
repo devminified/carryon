@@ -12,6 +12,13 @@
 // resummarize-session already made: user_id always comes from the
 // caller's own JWT, never the request body, so there's nothing for a
 // client to lie about even before RLS is checked.
+//
+// CO-504 added os/bytesBehind/lastUploadAt/uploadAttempts/
+// uploadErrors/redactionsApplied — all best-effort operational
+// numbers the agent computes locally (internal/upload.Uploader.
+// TakeCounts, internal/status.BytesBehind), never transcript content
+// (this ticket's own "heartbeats contain no transcript data" testing
+// point — nothing here is or derives from session text).
 
 import { z } from "npm:zod@4.6.7";
 import { errorResponse, json } from "../_shared/http.ts";
@@ -25,6 +32,12 @@ const Input = z.object({
   hostname: z.string().min(1).max(255),
   version: z.string().min(1).max(50),
   blockedSessions: z.number().int().nonnegative(),
+  os: z.string().min(1).max(50).optional(),
+  bytesBehind: z.number().int().nonnegative().optional(),
+  lastUploadAt: z.string().datetime().optional(),
+  uploadAttempts: z.number().int().nonnegative().optional(),
+  uploadErrors: z.number().int().nonnegative().optional(),
+  redactionsApplied: z.number().int().nonnegative().optional(),
 });
 
 export interface Deps {
@@ -70,6 +83,17 @@ export async function handle(
     version: input.version,
     blocked_sessions: input.blockedSessions,
     last_seen_at: new Date().toISOString(),
+    // Optional (an older agent binary hasn't shipped these fields
+    // yet) — null/0 rather than silently dropping the column from the
+    // upsert, so an upgraded admin dashboard reads a real "unknown"
+    // state instead of whatever this machine's previous row happened
+    // to hold.
+    os: input.os ?? null,
+    bytes_behind: input.bytesBehind ?? 0,
+    last_upload_at: input.lastUploadAt ?? null,
+    upload_attempts: input.uploadAttempts ?? 0,
+    upload_errors: input.uploadErrors ?? 0,
+    redactions_applied: input.redactionsApplied ?? 0,
   }, { onConflict: "user_id,machine_id" });
 
   if (error) {

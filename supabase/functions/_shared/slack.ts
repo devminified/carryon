@@ -157,6 +157,25 @@ export function buildCompatCIFailureMessage(input: {
   return { text, blocks: [mrkdwn(`🔴 ${text}${reason}${link}`)] };
 }
 
+// CO-504: check-observability-alerts' own "Alerts go to Slack"
+// message — fleet-wide operational alerts, same reasoning as CO-503's
+// own dedicated team-wide secret: never project_notification_
+// settings' per-project webhook, since none of these four conditions
+// belong to one client project (storage growth is the one that's
+// *about* a project, but the alert itself — "the fleet's own storage
+// is behaving oddly" — is still an ops concern, not something a
+// client's own Slack channel should see).
+export function buildObservabilityAlertMessage(input: {
+  summary: string;
+  detail?: string;
+}): SlackPayload {
+  const detail = input.detail ? `\n${input.detail}` : "";
+  return {
+    text: input.summary,
+    blocks: [mrkdwn(`🔴 ${input.summary}${detail}`)],
+  };
+}
+
 export interface DigestEntry {
   developerLogin: string;
   sessionCount: number;

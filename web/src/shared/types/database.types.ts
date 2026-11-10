@@ -37,25 +37,43 @@ export type Database = {
       agent_heartbeats: {
         Row: {
           blocked_sessions: number
+          bytes_behind: number
           hostname: string
           last_seen_at: string
+          last_upload_at: string | null
           machine_id: string
+          os: string | null
+          redactions_applied: number
+          upload_attempts: number
+          upload_errors: number
           user_id: string
           version: string
         }
         Insert: {
           blocked_sessions?: number
+          bytes_behind?: number
           hostname: string
           last_seen_at?: string
+          last_upload_at?: string | null
           machine_id: string
+          os?: string | null
+          redactions_applied?: number
+          upload_attempts?: number
+          upload_errors?: number
           user_id: string
           version: string
         }
         Update: {
           blocked_sessions?: number
+          bytes_behind?: number
           hostname?: string
           last_seen_at?: string
+          last_upload_at?: string | null
           machine_id?: string
+          os?: string | null
+          redactions_applied?: number
+          upload_attempts?: number
+          upload_errors?: number
           user_id?: string
           version?: string
         }
@@ -218,6 +236,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      observability_alert_state: {
+        Row: {
+          alert_key: string
+          is_firing: boolean
+          last_cleared_at: string | null
+          last_fired_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          alert_key: string
+          is_firing?: boolean
+          last_cleared_at?: string | null
+          last_fired_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          alert_key?: string
+          is_firing?: boolean
+          last_cleared_at?: string | null
+          last_fired_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
       project_members: {
         Row: {
@@ -521,11 +563,38 @@ export type Database = {
           },
         ]
       }
+      storage_snapshots: {
+        Row: {
+          project_id: string
+          snapshotted_at: string
+          total_bytes: number
+        }
+        Insert: {
+          project_id: string
+          snapshotted_at?: string
+          total_bytes: number
+        }
+        Update: {
+          project_id?: string
+          snapshotted_at?: string
+          total_bytes?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "storage_snapshots_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      abnormal_storage_growth_project_ids: { Args: never; Returns: string[] }
       end_idle_sessions: { Args: never; Returns: undefined }
       find_sessions_by_file: {
         Args: { p_limit?: number; p_path: string; p_project_id?: string }
@@ -564,6 +633,7 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      fleet_upload_error_rate: { Args: never; Returns: number }
       has_role: {
         Args: {
           p_min_role: Database["public"]["Enums"]["project_role"]
@@ -571,7 +641,18 @@ export type Database = {
         }
         Returns: boolean
       }
+      has_stale_agent_on_a_workday: { Args: never; Returns: boolean }
       is_any_project_admin: { Args: never; Returns: boolean }
+      lag_p50_seconds: { Args: never; Returns: number }
+      lag_p95_seconds: { Args: never; Returns: number }
+      project_storage_totals: {
+        Args: never
+        Returns: {
+          project_id: string
+          total_bytes: number
+        }[]
+      }
+      purge_stale_heartbeats: { Args: never; Returns: undefined }
       search_sessions: {
         Args: {
           p_match_count?: number

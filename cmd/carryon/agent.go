@@ -330,8 +330,13 @@ func (p *agentProgram) Start(kservice.Service) error {
 	}
 
 	go func() { p.done <- a.Run(ctx) }()
-	go runUpdateLoop(ctx, lazy)                // CO-308: daily self-update check, fire-and-forget — see its own doc comment
-	go runHeartbeatLoop(ctx, lazy, statusPath) // CO-410: admin "Agents" page check-in, fire-and-forget — see its own doc comment
+	go runUpdateLoop(ctx, lazy) // CO-308: daily self-update check, fire-and-forget — see its own doc comment
+	// CO-410/CO-504: admin "Agents" page check-in, fire-and-forget —
+	// realUploader (not the filter-wrapped uploader Agent itself
+	// holds) is what actually counts attempts/errors/redactions, so
+	// the heartbeat reads straight from it rather than through
+	// filter.Filter's own pass-through.
+	go runHeartbeatLoop(ctx, lazy, statusPath, filepath.Join(carryonDir, "state"), realUploader)
 	return nil
 }
 
