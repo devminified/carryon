@@ -100,6 +100,21 @@ test.describe.serial('session list (CO-402)', () => {
     await signInAsSeedUser(context, 'ali@devminified.com', 'password123');
     await page.goto(`/p/${PERF_PROJECT_ID}?branch=realtime-test`);
 
+    // Wait for the real Realtime subscription to actually be live
+    // before mutating anything — Realtime has no event replay/backlog,
+    // so a change published before the channel reaches 'SUBSCRIBED' is
+    // simply never delivered, not delivered late. Racing this with a
+    // fixed sleep (the previous version of this test) is exactly what
+    // made it flake under CI: the WebSocket handshake to a cold local
+    // Realtime server can take longer than a developer's own warm
+    // local stack, and no amount of waiting *after* the PATCH would
+    // recover a missed event. See use-live-sessions.ts's own comment.
+    await expect(page.locator('[data-realtime-status]')).toHaveAttribute(
+      'data-realtime-status',
+      'subscribed',
+      { timeout: 15000 },
+    );
+
     const row = page.locator('tbody tr').filter({ hasText: 'realtime test fixture session' });
     // CO-405's leading pin column shifts "Last activity" from 6 to 7.
     const before = await row.locator('td:nth-child(7)').textContent();

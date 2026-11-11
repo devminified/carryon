@@ -54,6 +54,20 @@ export function sortItems(items: SessionListItem[]): SessionListItem[] {
 // RLS still gates what a subscriber actually receives (see the
 // migration's own comment) — this only decides how to merge what
 // arrives into the page the caller is currently looking at.
+// Exposed so a consumer (the e2e suite, in particular) can tell a real
+// subscription is actually live instead of guessing from a fixed
+// sleep — found the hard way: a test that patches a row immediately
+// after navigating races this hook's own subscribe() call, and
+// Realtime has no replay/backlog — an update published before the
+// channel finishes its handshake is simply never delivered, not
+// delivered late, so no timeout length fixes that race. 'idle' covers
+// everything before 'SUBSCRIBED' arrives (the getSession() lookup,
+// setAuth(), and the subscribe() handshake itself) — not split into a
+// separate 'subscribing' state, since nothing downstream needs to
+// distinguish those sub-steps, and setting it synchronously inside
+// the effect body would just be a redundant extra render.
+export type RealtimeStatus = 'idle' | 'subscribed' | 'error';
+
 export function useLiveSessions(
   projectId: string,
   initialItems: SessionListItem[],
@@ -72,6 +86,7 @@ export function useLiveSessions(
   }
 
   const [now, setNow] = useState(() => Date.now());
+  const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>('idle');
   const itemsRef = useRef(items);
   useEffect(() => {
     itemsRef.current = items;
@@ -132,7 +147,11 @@ export function useLiveSessions(
             }
           },
         )
-        .subscribe();
+        .subscribe((status) => {
+          if (cancelled) return;
+          if (status === 'SUBSCRIBED') setRealtimeStatus('subscribed');
+          else if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') setRealtimeStatus('error');
+        });
     });
 
     return () => {
@@ -142,5 +161,5 @@ export function useLiveSessions(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, isFirstPage]);
 
-  return { items, now };
+  return { items, now, realtimeStatus };
 }
