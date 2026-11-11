@@ -34,6 +34,13 @@ export default async function SessionViewerPage({ params }: { params: Promise<{ 
 
   const apiUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 
+  // CO-601: computed once here, server-side, and threaded down to
+  // SidePanel/FamilyTree as a prop — see use-live-now.ts's own comment
+  // for why a bare client-side `new Date()`/`formatRelativeTime(...)`
+  // call inside those Client Components caused a real hydration
+  // mismatch.
+  const now = new Date().toISOString();
+
   return (
     <div className="flex gap-6">
       <div className="min-w-0 flex-1">
@@ -45,6 +52,7 @@ export default async function SessionViewerPage({ params }: { params: Promise<{ 
         familyNodes={familyNodes}
         danglingParentId={danglingParentId}
         canRename={canRename}
+        now={now}
       />
     </div>
   );

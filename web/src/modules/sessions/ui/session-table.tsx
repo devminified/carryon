@@ -17,6 +17,7 @@ export function SessionTable({
   filters,
   isFirstPage,
   isAdmin,
+  now: initialNow,
 }: {
   projectId: string;
   initialItems: SessionListItem[];
@@ -26,8 +27,18 @@ export function SessionTable({
   // (admins_can_update_sessions) is still the real enforcement if this
   // ever disagreed with the server's own view of the caller's role.
   isAdmin: boolean;
+  // CO-601: server-computed timestamp, see use-live-sessions.ts's own
+  // comment for why this can't be computed client-side in this
+  // component without risking a hydration mismatch.
+  now: string;
 }) {
-  const { items, now, realtimeStatus } = useLiveSessions(projectId, initialItems, filters, isFirstPage);
+  const { items, now, realtimeStatus } = useLiveSessions(
+    projectId,
+    initialItems,
+    filters,
+    isFirstPage,
+    initialNow,
+  );
 
   // Invisible, unstyled marker — exists only so the e2e suite can wait
   // for a real Realtime subscription to actually be live before
@@ -69,7 +80,7 @@ export function SessionTable({
           {items.map((s) => {
             const live =
               s.status === 'live' &&
-              now - new Date(s.lastActivityAt).getTime() < LIVE_ACTIVITY_WINDOW_MS;
+              now.getTime() - new Date(s.lastActivityAt).getTime() < LIVE_ACTIVITY_WINDOW_MS;
             return (
               <tr key={s.id} className="border-border border-b">
                 <td className="py-2 pr-2">
@@ -105,7 +116,7 @@ export function SessionTable({
                     {s.summary && (
                       <span>
                         AI-generated
-                        {s.summarizedAt && ` · ${formatRelativeTime(s.summarizedAt, new Date(now))}`}
+                        {s.summarizedAt && ` · ${formatRelativeTime(s.summarizedAt, now)}`}
                         {s.filesTouched.length > 0 && (
                           <span title={s.filesTouched.join('\n')}>
                             {' '}
@@ -134,7 +145,7 @@ export function SessionTable({
                   <OutcomeBadge outcome={s.outcome} blockedReason={s.blockedReason} />
                 </td>
                 <td className="text-foreground py-2 pr-4">
-                  {formatRelativeTime(s.lastActivityAt, new Date(now))}
+                  {formatRelativeTime(s.lastActivityAt, now)}
                 </td>
                 <td className="text-foreground py-2 pr-4">{formatBytes(s.totalBytes)}</td>
               </tr>

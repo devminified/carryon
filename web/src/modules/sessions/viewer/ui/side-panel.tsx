@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { formatBytes } from '@/shared/lib/format/bytes';
 import { formatRelativeTime } from '@/shared/lib/format/date';
+import { useLiveNow } from '@/shared/hooks/use-live-now';
 import { OutcomeBadge } from '../../ui/outcome-badge';
 import { FamilyTree } from './family-tree';
 import { RenameControl } from './rename-control';
@@ -22,6 +23,7 @@ export function SidePanel({
   familyNodes,
   danglingParentId,
   canRename,
+  now: initialNow,
 }: {
   session: SessionTranscriptMeta;
   familyNodes: FamilyNode[];
@@ -30,9 +32,14 @@ export function SidePanel({
   // canRename computation. RLS is still the real enforcement for the
   // rename itself.
   canRename: boolean;
+  // CO-601: server-computed timestamp — see use-live-now.ts's own
+  // comment for why this can't be computed client-side in this
+  // component without risking a hydration mismatch.
+  now: string;
 }) {
   const [copied, setCopied] = useState(false);
   const pullCommand = `carryon pull ${session.id}`;
+  const now = useLiveNow(initialNow);
 
   async function copyPullCommand() {
     try {
@@ -60,7 +67,7 @@ export function SidePanel({
             <p className="text-muted-foreground mt-1 text-sm">{session.summary}</p>
             {session.summarizedAt && (
               <p className="text-muted-foreground/70 mt-0.5 text-xs">
-                AI-generated · {formatRelativeTime(session.summarizedAt)}
+                AI-generated · {formatRelativeTime(session.summarizedAt, now)}
               </p>
             )}
           </>
@@ -76,7 +83,7 @@ export function SidePanel({
             ? <OutcomeBadge outcome={session.outcome} blockedReason={session.blockedReason} />
             : '—'}
         </Row>
-        <Row label="Last activity">{formatRelativeTime(session.lastActivityAt)}</Row>
+        <Row label="Last activity">{formatRelativeTime(session.lastActivityAt, now)}</Row>
         <Row label="Size">{formatBytes(session.totalBytes)}</Row>
       </dl>
 
@@ -93,7 +100,7 @@ export function SidePanel({
         </div>
       )}
 
-      <FamilyTree nodes={familyNodes} danglingParentId={danglingParentId} />
+      <FamilyTree nodes={familyNodes} danglingParentId={danglingParentId} now={now} />
 
       <div>
         <p className="text-muted-foreground mb-1 text-xs">Resume this session</p>

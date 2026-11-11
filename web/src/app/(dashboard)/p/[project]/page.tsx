@@ -87,6 +87,14 @@ export default async function ProjectPage({
   );
   if (nextCursor) nextParams.set('cursor', encodeCursor(nextCursor));
 
+  // CO-601: computed once here, server-side, and threaded all the way
+  // down as a prop (SessionTable -> useLiveSessions -> useLiveNow) so
+  // the SSR pass and the first client hydration pass render the exact
+  // same instant — see use-live-sessions.ts's own comment for why a
+  // client-computed `Date.now()` at that layer caused a real
+  // hydration mismatch.
+  const now = new Date().toISOString();
+
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-foreground text-lg font-semibold">{project.name}</h1>
@@ -97,6 +105,7 @@ export default async function ProjectPage({
         filters={filters}
         isFirstPage={!cursor}
         isAdmin={isAdmin}
+        now={now}
       />
       {nextCursor && (
         <Link
