@@ -31,6 +31,15 @@ RUN pnpm build
 
 FROM base AS runner
 ENV NODE_ENV=production
+# CO-507: this stage never runs npm/npx/corepack (CMD below calls
+# `next` directly — see its own comment), but `base`'s node:22-alpine
+# image ships them anyway, each carrying its own vendored
+# node_modules with real, if unreachable, CVEs (confirmed by a real
+# trivy scan: ~10 HIGH findings in npm's own bundled brace-expansion/
+# pacote/sigstore/etc., none in anything this image's own runtime
+# path touches). Removed here, not in `deps`/`builder`, which still
+# need them to actually build the app.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 COPY --from=builder /app/web/public ./public
 COPY --from=builder /app/web/.next ./.next
 COPY --from=builder /app/web/node_modules ./node_modules

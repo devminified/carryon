@@ -11,7 +11,23 @@ import { NextResponse, type NextRequest } from 'next/server';
 const PUBLIC_PATHS = ['/login', '/auth/callback'];
 
 export async function proxy(request: NextRequest) {
-  let response = NextResponse.next({ request });
+  // CO-507: a fresh nonce every request, carried on the REQUEST's own
+  // headers (not just the response's) — this is what lets Next.js's
+  // own RSC/hydration bootstrap scripts (the inline <script> tags a
+  // strict script-src would otherwise block outright, confirmed by a
+  // real browser test against this exact CSP: the whole app shell
+  // failed to hydrate) pick up the matching nonce automatically
+  // during server-side rendering, per Next's own documented pattern
+  // (content-security-policy.md's "Adding a nonce with Proxy").
+  // 'strict-dynamic' is what then lets those nonce'd scripts load
+  // their own dependencies without each one needing 'self' too.
+  const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
+  const cspHeaderValue = buildCSP(nonce);
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('Content-Security-Policy', cspHeaderValue);
+
+  let response = NextResponse.next({ request: { headers: requestHeaders } });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -23,7 +39,7 @@ export async function proxy(request: NextRequest) {
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          response = NextResponse.next({ request });
+          response = NextResponse.next({ request: { headers: requestHeaders } });
           cookiesToSet.forEach(({ name, value, options }) =>
             response.cookies.set(name, value, options),
           );
@@ -67,7 +83,7 @@ export async function proxy(request: NextRequest) {
       .select('id')
       .eq('id', projectMatch[1])
       .maybeSingle();
-    if (!project) return notFoundResponse();
+    if (!project) return notFoundResponse(cspHeaderValue);
   }
 
   if (data.user && sessionMatch) {
@@ -80,7 +96,7 @@ export async function proxy(request: NextRequest) {
       .select('id')
       .eq('id', sessionMatch[1])
       .maybeSingle();
-    if (!session) return notFoundResponse();
+    if (!session) return notFoundResponse(cspHeaderValue);
   }
 
   // CO-410: same reasoning as the two checks above, same reason a
@@ -96,17 +112,74 @@ export async function proxy(request: NextRequest) {
       .eq('user_id', data.user.id)
       .eq('role', 'admin')
       .limit(1);
-    if (!adminRows || adminRows.length === 0) return notFoundResponse();
+    if (!adminRows || adminRows.length === 0) return notFoundResponse(cspHeaderValue);
   }
 
-  return response;
+  return withSecurityHeaders(response, cspHeaderValue);
 }
 
-function notFoundResponse(): NextResponse {
-  return new NextResponse('This page could not be found.', {
-    status: 404,
-    headers: { 'content-type': 'text/plain; charset=utf-8' },
-  });
+function notFoundResponse(cspHeaderValue: string): NextResponse {
+  return withSecurityHeaders(
+    new NextResponse('This page could not be found.', {
+      status: 404,
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    }),
+    cspHeaderValue,
+  );
+}
+
+// CO-507: a real gap found by this ticket's own security review —
+// CLAUDE.md's anti-pattern list already says "strict CSP" for the
+// transcript viewer specifically because a transcript can contain
+// text Claude read from the open web (prompt-injection surface), but
+// no CSP or other standard security header existed anywhere in this
+// app until now. A nonce (not a blanket 'unsafe-inline') is what lets
+// Next.js's own inline bootstrap scripts run while still blocking an
+// attacker-injected one — see this file's own `nonce` comment above
+// for why a plain strict script-src alone broke the app in a real
+// browser test. Set in this one place every request already passes
+// through, rather than per-page, so it can never be missed on a new
+// route.
+function buildCSP(nonce: string): string {
+  const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+  return [
+    "default-src 'self'",
+    // 'wasm-unsafe-eval' alone looked sufficient in dev (confirmed by a
+    // real browser test: without it the whole session viewer's <main>
+    // failed to render) because dev mode separately needs 'unsafe-eval'
+    // for React's own eval()-based error-stack reconstruction — which
+    // was masking a second, production-real need for it. Found by a
+    // real production build (`next build && next start`) failing the
+    // exact same way: zstd-codec's Emscripten/Embind glue (lib/zstd.ts,
+    // CO-403's WASM zstd decoder) calls `new Function(...)` at runtime
+    // to bind its compiled exports — not WebAssembly.instantiate, and
+    // not gated by NODE_ENV — confirmed directly in that library's own
+    // bundled source (zstd-codec-binding-wasm.js). Every such call
+    // builds its function body from the library's own fixed internal
+    // method names, never from transcript content or any other
+    // attacker-reachable string, so this doesn't hand an XSS an eval
+    // primitive it wouldn't already have via some other sink — but it
+    // is still a real widening of defense-in-depth versus a policy with
+    // no 'unsafe-eval' at all, which is why this is called out here and
+    // in docs/co-507-threat-model.md rather than left unexplained.
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval' 'unsafe-eval'`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    `connect-src 'self' ${supabaseURL}`,
+    "font-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+  ].join('; ');
+}
+
+function withSecurityHeaders(response: NextResponse, cspHeaderValue: string): NextResponse {
+  response.headers.set('Content-Security-Policy', cspHeaderValue);
+  response.headers.set('X-Content-Type-Options', 'nosniff');
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  response.headers.set('X-Frame-Options', 'DENY');
+  return response;
 }
 
 export const config = {
