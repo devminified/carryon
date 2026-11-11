@@ -142,23 +142,27 @@ function notFoundResponse(cspHeaderValue: string): NextResponse {
 // route.
 function buildCSP(nonce: string): string {
   const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-  // React itself calls eval() in development only (to reconstruct
-  // server-side error call stacks in the browser — Next's own CSP
-  // guide documents this exact caveat); confirmed directly in a real
-  // browser that dev mode logs a blocked-eval console error without
-  // this. Neither React nor Next.js call eval() in a production
-  // build, so this never widens the policy actually shipped.
-  const isDev = process.env.NODE_ENV === 'development';
   return [
     "default-src 'self'",
-    // 'wasm-unsafe-eval', not 'unsafe-eval' — the viewer's own WASM
-    // zstd decoder (lib/zstd.ts, CO-403) needs WebAssembly.instantiate,
-    // which a strict script-src blocks by default same as any other
-    // eval-family call (confirmed by a real browser test: without
-    // this, the whole session viewer's <main> failed to render).
-    // This allows exactly that one WASM-compile operation, not plain
-    // eval()/new Function() — except in dev, per the isDev note above.
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'${isDev ? " 'unsafe-eval'" : ''}`,
+    // 'wasm-unsafe-eval' alone looked sufficient in dev (confirmed by a
+    // real browser test: without it the whole session viewer's <main>
+    // failed to render) because dev mode separately needs 'unsafe-eval'
+    // for React's own eval()-based error-stack reconstruction — which
+    // was masking a second, production-real need for it. Found by a
+    // real production build (`next build && next start`) failing the
+    // exact same way: zstd-codec's Emscripten/Embind glue (lib/zstd.ts,
+    // CO-403's WASM zstd decoder) calls `new Function(...)` at runtime
+    // to bind its compiled exports — not WebAssembly.instantiate, and
+    // not gated by NODE_ENV — confirmed directly in that library's own
+    // bundled source (zstd-codec-binding-wasm.js). Every such call
+    // builds its function body from the library's own fixed internal
+    // method names, never from transcript content or any other
+    // attacker-reachable string, so this doesn't hand an XSS an eval
+    // primitive it wouldn't already have via some other sink — but it
+    // is still a real widening of defense-in-depth versus a policy with
+    // no 'unsafe-eval' at all, which is why this is called out here and
+    // in docs/co-507-threat-model.md rather than left unexplained.
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval' 'unsafe-eval'`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
     `connect-src 'self' ${supabaseURL}`,
