@@ -28,10 +28,20 @@ type Client struct {
 // NewClient builds a Client for the given backend. baseURL and apiKey are
 // a config.Config's APIURL/AnonKey — the same ones internal/auth uses.
 func NewClient(baseURL, apiKey string) *Client {
+	return NewClientWithHTTP(baseURL, apiKey, &http.Client{Timeout: 30 * time.Second})
+}
+
+// NewClientWithHTTP is NewClient with a caller-supplied *http.Client —
+// CO-505's load-test tool uses this to wrap Edge Function calls in a
+// RoundTripper that injects random failures (internal/loadtest's own
+// "random network drops" testing point), without adding a test-only
+// code path to the normal agent/CLI construction, which stays on
+// NewClient.
+func NewClientWithHTTP(baseURL, apiKey string, httpClient *http.Client) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
-		http:    &http.Client{Timeout: 30 * time.Second},
+		http:    httpClient,
 	}
 }
 
