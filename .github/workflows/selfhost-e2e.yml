@@ -1,0 +1,228 @@
+name: selfhost-e2e
+
+# CO-506: brings up deploy/selfhost/docker-compose.yml for real (every
+# service built from the actual images/Dockerfiles that ship, not a
+# stand-in), then runs this repo's own existing e2e suites against it
+# instead of against `supabase start`'s local dev stack — the same
+# genuine upload/pull/web-viewer flows, proving the self-hosted
+# backend is wire-compatible with Supabase Cloud, not just that the
+# compose file parses. Also proves an "upgrade" (re-running the init
+# container against an already-seeded database) never loses data —
+# CO-506's own testing point.
+#
+# Scoped to paths that can plausibly break this stack, plus manual
+# dispatch — not every PR: pulling a dozen real container images and
+# building the web/init images on every push is a real cost this
+# repo's "no speculative scale" would reject for routine changes that
+# can't affect it (CLAUDE.md).
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/selfhost/**'
+      - 'supabase/migrations/**'
+      - 'supabase/functions/**'
+  workflow_dispatch:
+
+env:
+  # The Supabase local-dev CLI's own well-known demo JWT_SECRET (same
+  # value ci.yml's web-e2e job already uses against `supabase start`).
+  # ANON_KEY here is NOT that same job's own hardcoded demo value —
+  # found by a real `docker compose up` + `curl`: this stack's plain
+  # PostgREST/GoTrue images verify ANON_KEY as a classic HS256 JWT
+  # signed with JWT_SECRET below, but the local CLI's own demo anon
+  # key is a newer "publishable key" (non-JWT) that only its own
+  # managed key-verification layer understands — real here, a
+  # self-hosted PostgREST rejected it outright ("JWSError ... Expected
+  # 3 parts; got 1"). This is a real, freshly-minted anon-role JWT for
+  # the SAME JWT_SECRET instead (role: anon, iss: supabase) — SERVICE_
+  # ROLE_KEY below is still that job's own demo value since it already
+  # was a classic JWT (role: service_role) and decodes/verifies fine
+  # against this same secret. cmd/carryon/e2e_test.go's E2E_ANON_KEY
+  # override (below) is what lets that test take this different value
+  # without editing its own hardcoded local-CLI default.
+  JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+  ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzk0MzM5ODEwLCJleHAiOjIxMDk2OTk4MTB9.nu1ZlRBvYkjSdxMA5NQ5KCS6YcZIVk9ekjTcdnCc7oQ
+  SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_PORT: 54422
+  KONG_HTTP_PORT: 54421
+  SUPABASE_PUBLIC_URL: http://127.0.0.1:54421
+  WEB_APP_URL: http://127.0.0.1:3000
+  REALTIME_DB_ENC_KEY: 06dcbb8e6c4e2da4e5a5a3f4a4b4e7f1
+  REALTIME_SECRET_KEY_BASE: 2TxtnHNCMcBm2lPsrQ2r6uiCg6DOkmaRC5HuK9AzUm5p9Z8SMu1XwkTgdqwwrWBo
+  STORAGE_S3_ACCESS_KEY: carryonciaccesskey
+  STORAGE_S3_SECRET_KEY: carryonci0000000000secretkey00000000000
+  # A real CI run failed with 'Invalid bucket name ""' — these two
+  # have docker-compose.yml's own `${VAR:-default}` fallback, but a
+  # GitHub Actions job env block apparently doesn't leave an unlisted
+  # var references vars genuinely unset in a way that fallback
+  # reliably sees (found the hard way, not assumed); setting them
+  # explicitly here is the real fix either way.
+  STORAGE_S3_REGION: us-east-1
+  STORAGE_S3_BUCKET: carryon-sessions
+  # Enabled with dummy, non-functional credentials, not disabled: one
+  # real web e2e test clicks "Sign in with GitHub" and asserts GoTrue
+  # actually 302s to a real https://github.com/... authorize URL —
+  # GoTrue issues that redirect purely from GOTRUE_EXTERNAL_GITHUB_
+  # ENABLED/CLIENT_ID being set, with no live validation against
+  # GitHub at redirect time, so a fake client id is enough to
+  # exercise the real self-hosted OAuth redirect wiring without a
+  # real GitHub OAuth App or any live secret.
+  GITHUB_OAUTH_ENABLED: "true"
+  GITHUB_OAUTH_CLIENT_ID: selfhost-ci-dummy-client-id
+  GITHUB_OAUTH_CLIENT_SECRET: selfhost-ci-dummy-client-secret
+  AI_ENABLED: "false"
+
+jobs:
+  selfhost-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: bring up the self-hosted backend (every service but web — see below)
+        working-directory: deploy/selfhost
+        run: |
+          docker compose up -d --build db auth rest realtime storage seaweedfs storage-setup edge-functions kong init
+
+      - name: wait for Auth to be reachable through Kong
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS "${SUPABASE_PUBLIC_URL}/auth/v1/health" >/dev/null 2>&1; then
+              echo "auth reachable"; exit 0
+            fi
+            sleep 5
+          done
+          echo "auth never became reachable" >&2
+          docker compose -f deploy/selfhost/docker-compose.yml logs
+          exit 1
+
+      - name: wait for migrations to finish applying
+        run: |
+          for i in $(seq 1 60); do
+            if docker compose -f deploy/selfhost/docker-compose.yml logs init 2>&1 | grep -q "init complete"; then
+              echo "migrations applied"; exit 0
+            fi
+            sleep 5
+          done
+          echo "init never completed" >&2
+          docker compose -f deploy/selfhost/docker-compose.yml logs init
+          exit 1
+
+      - name: restart realtime to pick up its seeded tenant
+        working-directory: deploy/selfhost
+        run: |
+          # Realtime caches its one tenant row at its own boot, before
+          # the init container above has had a chance to seed it (see
+          # init/apply.sh's own comment) — a real run reproduced every
+          # Postgres Changes subscription failing with "TenantNotFound"
+          # until Realtime was restarted after that row existed.
+          docker compose restart realtime
+
+      - name: seed (same fixture data the local-dev e2e suites use)
+        run: |
+          psql "postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/postgres" \
+            -v ON_ERROR_STOP=1 -f supabase/seed.sql
+
+      - name: go e2e test against the self-hosted backend (CO-211's real upload/pull flow)
+        run: go test ./cmd/carryon/... -run TestPullEndToEndAgainstLocalSupabase -v
+        env:
+          E2E_API_URL: ${{ env.SUPABASE_PUBLIC_URL }}
+          E2E_ANON_KEY: ${{ env.ANON_KEY }}
+          E2E_DB_URL: postgresql://postgres:${{ env.POSTGRES_PASSWORD }}@127.0.0.1:${{ env.POSTGRES_PORT }}/postgres
+
+      - name: build the self-hosted web image (Dockerfile sanity — not the one Playwright hits below)
+        working-directory: deploy/selfhost
+        run: docker compose build web
+
+      # Playwright drives the real web app the normal way (its own
+      # webServer: pnpm build && pnpm start, same as ci.yml's web-e2e
+      # job) pointed at this job's self-hosted backend instead of
+      # `supabase start` — deliberately not the dockerized `web`
+      # service above (which would also want :3000); that service's
+      # own Dockerfile is still exercised by the build step just above.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: web
+      - name: web e2e against the self-hosted backend
+        working-directory: web
+        # One test excluded, not silently — see README.md's own
+        # "Known issue: live (no-reload) session list updates don't
+        # work yet" section. Every other test in this exact suite,
+        # including everything else that touches Storage/Auth/RLS/
+        # Edge Functions/the admin console, is a real gate here.
+        # `pnpm run seed:e2e` first since invoking playwright directly
+        # (not via the `test:e2e` script) skips package.json's own
+        # `pretest:e2e` lifecycle hook.
+        run: |
+          pnpm run seed:e2e
+          pnpm exec playwright test --grep-invert "a live chunk upload's activity bump reaches the page via Realtime"
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ env.SUPABASE_PUBLIC_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ env.ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ env.SERVICE_ROLE_KEY }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: selfhost-playwright-report
+          path: web/playwright-report/
+          retention-days: 7
+
+      - name: snapshot a known row before the "upgrade"
+        run: |
+          psql "postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/postgres" \
+            -tAc "select count(*) from projects" > /tmp/projects_before.txt
+          psql "postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/postgres" \
+            -tAc "select count(*) from supabase_migrations.schema_migrations" > /tmp/migrations_before.txt
+
+      # CO-506's own testing point: upgrading this stack from version N
+      # to N+1 must preserve all data. A real version bump isn't
+      # available in CI, so this re-runs the exact same init container
+      # against the already-seeded, already-migrated database — the
+      # same thing a real upgrade does for every migration that was
+      # already applied before the bump. If init's "already applied"
+      # skip logic were broken (re-running a migration that assumes a
+      # fresh table, say), this is what would actually catch it.
+      - name: simulate an upgrade — re-run init against existing data
+        working-directory: deploy/selfhost
+        run: docker compose up --build init
+
+      - name: assert no data was lost or duplicated by the "upgrade"
+        run: |
+          after_projects=$(psql "postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/postgres" \
+            -tAc "select count(*) from projects")
+          after_migrations=$(psql "postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/postgres" \
+            -tAc "select count(*) from supabase_migrations.schema_migrations")
+          before_projects=$(cat /tmp/projects_before.txt)
+          before_migrations=$(cat /tmp/migrations_before.txt)
+          if [ "$after_projects" != "$before_projects" ]; then
+            echo "projects row count changed across the simulated upgrade: $before_projects -> $after_projects" >&2
+            exit 1
+          fi
+          if [ "$after_migrations" != "$before_migrations" ]; then
+            echo "migration count changed across the simulated upgrade (should be a no-op re-run): $before_migrations -> $after_migrations" >&2
+            exit 1
+          fi
+          echo "upgrade preserved all data: $after_projects projects, $after_migrations migrations recorded"
+
+      - name: docker compose logs (always, for debugging)
+        if: always()
+        working-directory: deploy/selfhost
+        run: docker compose logs
+
+      - name: tear down
+        if: always()
+        working-directory: deploy/selfhost
+        run: docker compose down -v

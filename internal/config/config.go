@@ -101,6 +101,32 @@ func Load() (*Config, error) {
 	return &cfg, nil
 }
 
+// LoadRaw reads ~/.carryon/config.toml like Load, but skips the
+// api_url/anon_key presence checks and never generates or persists a
+// machine ID. For `carryon config set/get` (CO-506): a self-host
+// bootstrap sets api_url and anon_key in two separate commands, so
+// the file is legitimately, temporarily incomplete between them —
+// Load()'s strict validation exists for every other command, which
+// genuinely needs a fully-usable client, not for this one. Returns a
+// zero-value Config (not an error) when the file doesn't exist yet,
+// since `config set` on a brand-new machine is itself the
+// bootstrapping step.
+func LoadRaw() (*Config, error) {
+	p, err := path()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(p); errors.Is(err, os.ErrNotExist) {
+		return &Config{}, nil
+	}
+
+	var cfg Config
+	if _, err := toml.DecodeFile(p, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", p, err)
+	}
+	return &cfg, nil
+}
+
 func generateMachineID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {

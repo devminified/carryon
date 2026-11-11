@@ -7,7 +7,12 @@
 
 import { createPrivateKey, createSign } from "node:crypto";
 
-const GITHUB_API = "https://api.github.com";
+// CO-506: configurable for self-hosted GitHub Enterprise Server,
+// whose own API lives at `https://<ghes-host>/api/v3`, not
+// api.github.com — github.com's own public API is still the default,
+// unchanged for every environment that doesn't set this.
+const GITHUB_API = Deno.env.get("GITHUB_API_BASE_URL") ??
+  "https://api.github.com";
 
 // GitHub App JWTs are capped at 10 minutes; this is comfortably inside
 // that and inside the 15-minute sync interval, so a fresh App JWT (and

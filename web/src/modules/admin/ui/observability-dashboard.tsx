@@ -1,4 +1,5 @@
 import { formatBytes } from '@/shared/lib/format/bytes';
+import { AI_ENABLED } from '@/shared/lib/ai-enabled';
 import { formatMillis, formatRate, formatSeconds } from '../lib/format-observability';
 import type { ObservabilityDashboard } from '../types';
 
@@ -23,51 +24,68 @@ export function ObservabilityDashboardView({ dashboard }: { dashboard: Observabi
             {formatRate(dashboard.fleetErrorRate)}
           </div>
         </div>
-        <div className="border-border rounded border p-4">
-          <div className="text-muted-foreground text-xs">
-            AI cost, most recent day with usage
-          </div>
-          <div className="text-foreground mt-1 text-lg font-semibold">
-            ${(dashboard.aiCostByDay[0]?.costUsd ?? 0).toFixed(2)}
-          </div>
-        </div>
-        <div className="border-border rounded border p-4">
-          <div className="text-muted-foreground text-xs">Summary job latency (p50 / p95)</div>
-          <div className="text-foreground mt-1 text-lg font-semibold">
-            {formatMillis(dashboard.summarizeJobP50Ms)} / {formatMillis(dashboard.summarizeJobP95Ms)}
-          </div>
-        </div>
-        <div className="border-border rounded border p-4">
-          <div className="text-muted-foreground text-xs">Summary job failure rate, last 24h</div>
-          <div className="text-foreground mt-1 text-lg font-semibold">
-            {formatRate(dashboard.summarizeJobFailureRate)}
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <h2 className="text-foreground mb-2 text-sm font-semibold">AI cost per day</h2>
-        {dashboard.aiCostByDay.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No AI usage recorded yet.</p>
-        ) : (
-          <table className="w-full max-w-md text-left text-sm">
-            <thead>
-              <tr className="border-border border-b text-xs font-medium">
-                <th className="py-1">Date</th>
-                <th className="py-1">Cost (USD)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dashboard.aiCostByDay.map((d) => (
-                <tr key={d.date} className="border-border border-b">
-                  <td className="py-1">{d.date}</td>
-                  <td className="py-1">${d.costUsd.toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* CO-506: these three tiles only ever show real numbers when
+            an ANTHROPIC_API_KEY is configured — summarizeSession() is
+            never called at all otherwise (edge-functions.md), so a
+            deployment running without one (most commonly self-hosted,
+            see ai-enabled.ts) would otherwise see nothing but $0.00
+            and "No data yet" forever. */}
+        {AI_ENABLED && (
+          <>
+            <div className="border-border rounded border p-4">
+              <div className="text-muted-foreground text-xs">
+                AI cost, most recent day with usage
+              </div>
+              <div className="text-foreground mt-1 text-lg font-semibold">
+                ${(dashboard.aiCostByDay[0]?.costUsd ?? 0).toFixed(2)}
+              </div>
+            </div>
+            <div className="border-border rounded border p-4">
+              <div className="text-muted-foreground text-xs">
+                Summary job latency (p50 / p95)
+              </div>
+              <div className="text-foreground mt-1 text-lg font-semibold">
+                {formatMillis(dashboard.summarizeJobP50Ms)} /{' '}
+                {formatMillis(dashboard.summarizeJobP95Ms)}
+              </div>
+            </div>
+            <div className="border-border rounded border p-4">
+              <div className="text-muted-foreground text-xs">
+                Summary job failure rate, last 24h
+              </div>
+              <div className="text-foreground mt-1 text-lg font-semibold">
+                {formatRate(dashboard.summarizeJobFailureRate)}
+              </div>
+            </div>
+          </>
         )}
       </div>
+
+      {AI_ENABLED && (
+        <div>
+          <h2 className="text-foreground mb-2 text-sm font-semibold">AI cost per day</h2>
+          {dashboard.aiCostByDay.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No AI usage recorded yet.</p>
+          ) : (
+            <table className="w-full max-w-md text-left text-sm">
+              <thead>
+                <tr className="border-border border-b text-xs font-medium">
+                  <th className="py-1">Date</th>
+                  <th className="py-1">Cost (USD)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dashboard.aiCostByDay.map((d) => (
+                  <tr key={d.date} className="border-border border-b">
+                    <td className="py-1">{d.date}</td>
+                    <td className="py-1">${d.costUsd.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       <div>
         <h2 className="text-foreground mb-2 text-sm font-semibold">Storage per project</h2>

@@ -1,0 +1,90 @@
+_format_version: "3.0"
+_transform: true
+
+###
+# CO-506: the one API gateway every client/web app/CLI talks to.
+# Routes map 1:1 onto docker-compose.yml's own services — see that
+# file's own header comment. `key-auth` on each service checks the
+# anon/service-role API key the same way Supabase Cloud's own Kong
+# config does (consumers below); real authorization is still each
+# downstream service's own job (GoTrue's JWT, PostgREST's RLS-backed
+# JWT, storage-api's bucket policies) — Kong's key-auth here is only
+# "is this a request carrying one of our two known API keys," not a
+# user identity check.
+###
+
+services:
+  - name: auth-v1
+    url: http://auth:9999
+    routes:
+      - name: auth-v1-all
+        strip_path: true
+        paths:
+          - /auth/v1
+    plugins:
+      - name: cors
+
+  - name: rest-v1
+    url: http://rest:3000
+    routes:
+      - name: rest-v1-all
+        strip_path: true
+        paths:
+          - /rest/v1
+    plugins:
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: true
+
+  - name: realtime-v1
+    url: http://realtime:4000/socket
+    routes:
+      - name: realtime-v1-all
+        strip_path: true
+        paths:
+          - /realtime/v1
+    plugins:
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: true
+
+  - name: storage-v1
+    url: http://storage:5000
+    routes:
+      - name: storage-v1-all
+        strip_path: true
+        paths:
+          - /storage/v1
+    plugins:
+      - name: cors
+    # Deliberately NO key-auth here, unlike rest-v1/realtime-v1 above
+    # — a real upload failed with a 401 from Kong itself (never
+    # reaching storage-api at all, confirmed by its own request log
+    # showing no PUT) until this was removed. The actual signed PUT
+    # to a chunk's upload URL (internal/api.Client.StorageUploadURL)
+    # carries its auth as a `?token=` query param, not an apikey
+    # header or query param Kong's key-auth plugin would recognize —
+    # storage-api itself verifies that token; Kong's own key-auth
+    # would reject every such request before it ever gets there.
+    # Matches Supabase's own published self-hosting kong.yml, which
+    # doesn't key-auth this route either, for the same reason.
+
+  - name: functions-v1
+    url: http://edge-functions:9000
+    routes:
+      - name: functions-v1-all
+        strip_path: true
+        paths:
+          - /functions/v1
+    plugins:
+      - name: cors
+
+consumers:
+  - username: anon
+    keyauth_credentials:
+      - key: $ANON_KEY
+  - username: service_role
+    keyauth_credentials:
+      - key: $SERVICE_ROLE_KEY
