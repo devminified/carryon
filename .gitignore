@@ -43,6 +43,7 @@ supabase/.temp/
 
 # --- Test artifacts ---
 test/fixtures/qa-evidence/
+/loadtest-report.md
 
 # --- Claude Code ---
 .claude/settings.local.json
