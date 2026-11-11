@@ -142,6 +142,19 @@ function notFoundResponse(cspHeaderValue: string): NextResponse {
 // route.
 function buildCSP(nonce: string): string {
   const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+  // CSP's connect-src matches scheme, not just host — ws(s):// is a
+  // different source expression from http(s):// even for the exact
+  // same host, so Supabase Realtime's own WebSocket connection
+  // (useLiveSessions, CO-402) needs its own explicit entry or the
+  // browser blocks it outright: "violates ... connect-src 'self'
+  // http://127.0.0.1:54421", confirmed directly in a real browser
+  // console, not assumed. This is also why a plain-text 'realtime
+  // subscription never completing' showed up as a *CO-402* e2e flake
+  // rather than something CSP-shaped — the browser drops a blocked
+  // WebSocket silently as far as the app's own code is concerned,
+  // surfacing only via a console error, not a thrown exception
+  // anything in the page could react to.
+  const supabaseWebSocketURL = supabaseURL.replace(/^http/, 'ws');
   return [
     "default-src 'self'",
     // 'wasm-unsafe-eval' alone looked sufficient in dev (confirmed by a
@@ -165,7 +178,7 @@ function buildCSP(nonce: string): string {
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval' 'unsafe-eval'`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
-    `connect-src 'self' ${supabaseURL}`,
+    `connect-src 'self' ${supabaseURL} ${supabaseWebSocketURL}`,
     "font-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
