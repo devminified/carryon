@@ -1,8 +1,11 @@
 # Carryon
 
+[![CI](https://github.com/devminified/carryon/actions/workflows/ci.yml/badge.svg)](https://github.com/devminified/carryon/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Capture every Claude Code session on a registered repo, upload it (redacted) to Supabase as it happens, and let a teammate pull it back down — code and conversation both — and resume exactly where it left off.
 
-See `Overview.md` for the product pitch and 52-ticket build plan, `Devminified Carryon — System Design Document (SDD).md` for the architecture and invariants, and `Carryon-TRD-Tickets.md` for the full ticket descriptions. `CLAUDE.md` and `.claude/rules/` are the binding engineering conventions for this repo.
+See `docs/` for the docs site (quick start, architecture, self-hosting, FAQ), `Overview.md` for the product pitch and 52-ticket build plan, `Devminified Carryon — System Design Document (SDD).md` for the architecture and invariants, and `Carryon-TRD-Tickets.md` for the full ticket descriptions. `CLAUDE.md` and `.claude/rules/` are the binding engineering conventions for this repo. Contributing? See `CONTRIBUTING.md`; found a security issue? See `SECURITY.md`, not a public issue.
 
 **Current status:** Phases 1–4 are complete, through `CO-410`. Phases 1–3 cover the laptop side: capture, upload, pull/resume, roles and row-level security, redaction (laptop-side plus a nightly server-side rescan backstop), the audit log, retention/deletion, GitHub-team-mirrored project roles, and fleet packaging with a signed daily auto-update channel. Phase 4 adds the web app: GitHub sign-in, the project/session list with search, the real session viewer (chat, tool calls, diffs, redaction highlighting, a fork family tree), rename and pin, an AI-generated title/summary for every session (with a manual re-summarize), Slack notifications (blocked-session alerts, a secret-rescan backstop, an opt-in daily digest), and an admin console (`/admin`) for registering projects, managing members, browsing the audit log, watching per-machine agent health, and tuning redaction/update config. Phase 5 (search, hardening, self-hosting, and the public open-source release) is next.
 
