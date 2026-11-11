@@ -1,0 +1,69 @@
+# CO-508: gitleaks config for the public repo.
+#
+# A real `gitleaks detect` run against this repo's full history (82
+# commits, ~3.3MB of diffs) found 27 "leaks" — every single one is one
+# of a small, fixed set of values this codebase already documents, in
+# the exact files gitleaks flagged, as Supabase's own published local
+# development demo credentials (`supabase start`'s well-known
+# JWT_SECRET, service-role key, anon key, and publishable key — the
+# identical values on every machine that runs the local Supabase CLI,
+# never a real per-install secret) or dynamically-generated,
+# throwaway test fixtures (a fresh RSA keypair generated at test run
+# time, a filler-based fake private-key block the redaction engine's
+# own corpus test is specifically checking it catches). None are real
+# credentials, client names, or production secrets — verified by
+# reading every flagged file's own existing comment before adding it
+# here, not assumed. See `.claude/rules/redaction.md` and
+# `.claude/rules/commands.md`'s own "Local Supabase container" section
+# for where these same values are documented as public and intentional.
+#
+# Re-run `gitleaks detect --source . -v --redact` (or the full-history
+# variant without `--no-git`) after adding any new value here and
+# confirm it still comes back with a reduced, explained finding count
+# — never add an entry to make a scan "pass" without first reading
+# the flagged file's own context, the same discipline CO-507's threat
+# model review applied to every tool-run finding.
+
+title = "carryon gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Supabase's own published local-dev demo credentials and dynamically-generated test fixtures — not real secrets"
+regexes = [
+  # supabase start's well-known demo service-role key (role: service_role, iss: supabase-demo) —
+  # used by cmd/carryon/e2e_test.go, cmd/carryon/storage_hardening_test.go, web/e2e/*, .github/workflows/*.yml
+  '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0\.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU''',
+  # a freshly-minted anon-role JWT for selfhost-e2e.yml's own JWT_SECRET below — see that
+  # workflow's own comment for why this differs from the local CLI's publishable-key format
+  '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzk0MzM5ODEwLCJleHAiOjIxMDk2OTk4MTB9\.nu1ZlRBvYkjSdxMA5NQ5KCS6YcZIVk9ekjTcdnCc7oQ''',
+  # supabase start's well-known demo anon publishable key (non-JWT format)
+  '''sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH''',
+  # the self-hosted compose stack's own fixed demo JWT_SECRET (selfhost-e2e.yml, deploy/selfhost/)
+  '''super-secret-jwt-token-with-at-least-32-characters-long''',
+  # selfhost-e2e.yml's own fixed, CI-only Realtime encryption key/secret-key-base —
+  # throwaway values for an ephemeral CI stack that's torn down at the end of every
+  # run, never a value protecting any real deployment's data
+  '''06dcbb8e6c4e2da4e5a5a3f4a4b4e7f1''',
+  '''2TxtnHNCMcBm2lPsrQ2r6uiCg6DOkmaRC5HuK9AzUm5p9Z8SMu1XwkTgdqwwrWBo''',
+]
+paths = [
+  # redact.test.ts's corpus-test fixtures are *meant* to look like secrets —
+  # that's the whole point of the test (redaction.md: "every rule needs a
+  # positive case"). Every value here is generated per-test-run from a
+  # filler function, never a static committed credential.
+  '''supabase/functions/_shared/redact\.test\.ts''',
+  # github.test.ts generates a fresh RSA keypair at test run time
+  # (generatePKCS1KeyPair()) purely to exercise signAppJWT — never a
+  # reused or real GitHub App private key.
+  '''supabase/functions/_shared/github\.test\.ts''',
+  # storage_hardening_test.go's own copy of the same Supabase demo
+  # service-role key above (split across a multi-line string
+  # concatenation, so the single-line regex above doesn't match it),
+  # plus a plain test fixture filename ("co305-expiry-test.txt") that
+  # trips the generic-api-key entropy heuristic but is not a secret
+  # of any kind — both already carry their own "not a real
+  # credential" comment in this file.
+  '''cmd/carryon/storage_hardening_test\.go''',
+]
