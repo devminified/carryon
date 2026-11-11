@@ -3,9 +3,11 @@
 import { useActionState } from 'react';
 import { updateRedactionConfigAction } from '../data/actions';
 import type { RedactionConfigRow } from '../types';
+import { useActionToast } from '@/shared/hooks/use-action-toast';
 
 export function RedactionConfigForm({ config }: { config: RedactionConfigRow }) {
   const [state, action, isPending] = useActionState(updateRedactionConfigAction, null);
+  useActionToast(state, 'Redaction config saved.');
 
   return (
     <form action={action} className="max-w-2xl space-y-4">

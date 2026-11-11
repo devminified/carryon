@@ -12,7 +12,12 @@ import { pinSessionSchema, renameSessionSchema, resummarizeSessionSchema } from 
 // (owner_can_update_their_sessions OR admins_can_update_sessions) is
 // the real enforcement; .select('id') lets a zero-row RLS denial be
 // told apart from a real update, same pattern as rename-session.
-export type RenameSessionActionState = { error?: string } | null;
+// CO-603: success is a fresh { success: true } object, not bare null —
+// useActionToast's effect is keyed on this state, and Object.is(null,
+// null) is always true, so a bare-null success would be
+// indistinguishable from "no submission has happened yet" and could
+// never fire a toast.
+export type RenameSessionActionState = { error?: string; success?: boolean } | null;
 
 export async function renameSessionAction(
   _prevState: RenameSessionActionState,
@@ -38,7 +43,7 @@ export async function renameSessionAction(
   }
 
   revalidatePath(`/sessions/${parsed.data.sessionId}`);
-  return null;
+  return { success: true };
 }
 
 // Admin-only in practice (the pin toggle is only ever rendered for an
@@ -48,7 +53,7 @@ export async function renameSessionAction(
 // subscription (use-live-sessions.ts) — revalidatePath below is still
 // worth keeping for a fresh navigation/another tab, same pattern as
 // renameSessionAction.
-export type PinSessionActionState = { error?: string } | null;
+export type PinSessionActionState = { error?: string; success?: boolean } | null;
 
 export async function pinSessionAction(
   _prevState: PinSessionActionState,
@@ -77,7 +82,7 @@ export async function pinSessionAction(
   if (typeof projectId === 'string' && projectId) {
     revalidatePath(`/p/${projectId}`);
   }
-  return null;
+  return { success: true };
 }
 
 // CO-408: unlike rename/pin, this genuinely needs the resummarize-
@@ -89,7 +94,7 @@ export async function pinSessionAction(
 // caller's own session — see that helper's own doc comment) plus
 // error-shape translation for the UI.
 export type ResummarizeSessionActionState =
-  | { error?: string; retryAfterSeconds?: number }
+  | { error?: string; success?: boolean; retryAfterSeconds?: number }
   | null;
 
 export async function resummarizeSessionAction(
@@ -131,5 +136,5 @@ export async function resummarizeSessionAction(
     revalidatePath(`/p/${projectId}`);
   }
   revalidatePath(`/sessions/${parsed.data.sessionId}`);
-  return null;
+  return { success: true };
 }

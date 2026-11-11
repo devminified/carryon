@@ -2,6 +2,7 @@
 
 import { useActionState } from 'react';
 import { renameSessionAction } from '@/modules/sessions/data/actions';
+import { useActionToast } from '@/shared/hooks/use-action-toast';
 
 // CO-405: renames a session from the side panel — shown only when the
 // page has already determined the current viewer is the session's
@@ -10,6 +11,7 @@ import { renameSessionAction } from '@/modules/sessions/data/actions';
 // every other mutation in this codebase.
 export function RenameControl({ sessionId, title }: { sessionId: string; title: string | null }) {
   const [state, action, isPending] = useActionState(renameSessionAction, null);
+  useActionToast(state, 'Session renamed.');
 
   return (
     <form action={action} className="flex flex-col gap-1">

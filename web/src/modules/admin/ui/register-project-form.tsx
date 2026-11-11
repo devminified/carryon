@@ -2,9 +2,16 @@
 
 import { useActionState } from 'react';
 import { registerProjectAction } from '../data/actions';
+import { useActionToast } from '@/shared/hooks/use-action-toast';
 
 export function RegisterProjectForm() {
   const [state, action, isPending] = useActionState(registerProjectAction, null);
+  // Deliberately distinct wording from the inline "Project
+  // registered." text below — identical text in both places is
+  // ambiguous to a Playwright getByText locator (hit for real:
+  // admin-pages.spec.ts's own registration test), and is also a
+  // redundant double-announcement for a screen reader.
+  useActionToast(state, 'New project added.');
 
   return (
     <form action={action} className="border-border mb-6 flex flex-wrap items-end gap-3 rounded border p-4">

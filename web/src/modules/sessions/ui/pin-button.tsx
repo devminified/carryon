@@ -2,6 +2,7 @@
 
 import { useActionState } from 'react';
 import { pinSessionAction } from '../data/actions';
+import { useActionToast } from '@/shared/hooks/use-action-toast';
 
 // CO-405: admin-only pin toggle for the session list — see
 // session-table.tsx for why visibility, not just the write itself, is
@@ -16,6 +17,10 @@ export function PinButton({
   pinned: boolean;
 }) {
   const [state, action, isPending] = useActionState(pinSessionAction, null);
+  // `pinned` is still the pre-toggle value when this fires (the prop
+  // only catches up once revalidatePath's refetch/Realtime lands), so
+  // !pinned is what the session just became.
+  useActionToast(state, pinned ? 'Unpinned.' : 'Pinned.');
 
   return (
     <form action={action}>
