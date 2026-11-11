@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { formatBytes } from '@/shared/lib/format/bytes';
 import { formatRelativeTime } from '@/shared/lib/format/date';
 import { useLiveNow } from '@/shared/hooks/use-live-now';
+import { Button } from '@/shared/ui/button';
 import { OutcomeBadge } from '../../ui/outcome-badge';
 import { FamilyTree } from './family-tree';
 import { RenameControl } from './rename-control';
@@ -104,13 +105,14 @@ export function SidePanel({
 
       <div>
         <p className="text-muted-foreground mb-1 text-xs">Resume this session</p>
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={copyPullCommand}
-          className="border-border bg-background text-foreground hover:bg-border/30 w-full truncate rounded border px-2 py-1 text-left font-mono text-xs"
+          className="h-auto w-full justify-start truncate px-2 py-1 font-mono text-xs"
         >
           {copied ? 'Copied!' : pullCommand}
-        </button>
+        </Button>
       </div>
     </aside>
   );

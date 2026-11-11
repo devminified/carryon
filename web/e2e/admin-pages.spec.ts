@@ -224,14 +224,18 @@ test.describe.serial('admin pages (CO-410)', () => {
 
     await page.goto(`/admin/members?project=${projectId}`);
     await page.getByLabel('Email').fill(SARA_EMAIL);
-    await page.getByLabel('Role').selectOption('viewer');
+    // CO-604: this role field is now a shadcn/Radix combobox, not a
+    // native <select> — selectOption() only works on the latter.
+    await page.getByRole('combobox', { name: 'Role' }).click();
+    await page.getByRole('option', { name: 'viewer', exact: true }).click();
     await page.getByRole('button', { name: 'Add manual override' }).click();
 
     const row = page.locator('tr').filter({ hasText: 'sara' });
     await expect(row).toBeVisible();
     await expect(row.getByText('manual')).toBeVisible();
 
-    await row.locator('select[name="role"]').selectOption('resumer');
+    await row.getByRole('combobox').click();
+    await page.getByRole('option', { name: 'resumer', exact: true }).click();
     // The role select auto-submits a real Server Action on change —
     // wait for the write to actually land before reloading, rather
     // than an arbitrary sleep.
@@ -246,7 +250,7 @@ test.describe.serial('admin pages (CO-410)', () => {
 
     await page.reload();
     const reloadedRow = page.locator('tr').filter({ hasText: 'sara' });
-    await expect(reloadedRow.locator('select[name="role"]')).toHaveValue('resumer');
+    await expect(reloadedRow.getByRole('combobox')).toContainText('resumer');
 
     await reloadedRow.getByRole('button', { name: 'Remove' }).click();
     await expect(page.locator('tr').filter({ hasText: 'sara' })).toHaveCount(0);

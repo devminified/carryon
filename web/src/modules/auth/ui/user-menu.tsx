@@ -1,5 +1,6 @@
 import { signOut } from '../data/actions';
 import type { CurrentUser } from '@/shared/lib/auth';
+import { Button } from '@/shared/ui/button';
 
 export function UserMenu({ user }: { user: CurrentUser }) {
   return (
@@ -7,9 +8,9 @@ export function UserMenu({ user }: { user: CurrentUser }) {
       <span className="text-foreground text-sm">
         {user.githubLogin ?? user.email ?? 'Signed in'}
       </span>
-      <button type="submit" className="text-muted-foreground hover:text-foreground text-sm">
+      <Button type="submit" variant="ghost" size="sm">
         Sign out
-      </button>
+      </Button>
     </form>
   );
 }

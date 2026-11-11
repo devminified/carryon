@@ -3,6 +3,8 @@
 import { useActionState } from 'react';
 import { renameSessionAction } from '@/modules/sessions/data/actions';
 import { useActionToast } from '@/shared/hooks/use-action-toast';
+import { Button } from '@/shared/ui/button';
+import { Input } from '@/shared/ui/input';
 
 // CO-405: renames a session from the side panel — shown only when the
 // page has already determined the current viewer is the session's
@@ -16,22 +18,24 @@ export function RenameControl({ sessionId, title }: { sessionId: string; title: 
   return (
     <form action={action} className="flex flex-col gap-1">
       <input type="hidden" name="sessionId" value={sessionId} />
-      <input
+      <Input
         name="title"
         defaultValue={title ?? ''}
         placeholder="(untitled session)"
         maxLength={200}
         disabled={isPending}
-        className="border-border bg-background text-foreground w-full rounded border px-1.5 py-1 text-sm font-semibold"
+        className="h-auto px-1.5 py-1 text-sm font-semibold"
       />
       <div className="flex items-center gap-2">
-        <button
+        <Button
           type="submit"
+          variant="link"
+          size="xs"
           disabled={isPending}
-          className="text-muted-foreground text-xs underline disabled:opacity-50"
+          className="text-muted-foreground h-auto p-0 text-xs"
         >
           {isPending ? 'Saving…' : 'Rename'}
-        </button>
+        </Button>
         {state?.error && <p className="text-destructive text-xs">{state.error}</p>}
       </div>
     </form>

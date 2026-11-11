@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/shared/lib/supabase/client';
+import { Button } from '@/shared/ui/button';
 
 export function LoginForm() {
   const searchParams = useSearchParams();
@@ -33,14 +34,9 @@ export function LoginForm() {
     // wrapper is a separate DOM node the extension also tags
     // (bis_skin_checked), confirmed from the real console error.
     <div className="flex flex-col items-center gap-3" suppressHydrationWarning>
-      <button
-        type="button"
-        onClick={signInWithGitHub}
-        disabled={pending}
-        className="bg-foreground text-background rounded-md px-4 py-2 text-sm font-medium disabled:opacity-60"
-      >
+      <Button type="button" onClick={signInWithGitHub} disabled={pending}>
         {pending ? 'Redirecting…' : 'Sign in with GitHub'}
-      </button>
+      </Button>
       {error && <p className="text-destructive text-sm">{error}</p>}
     </div>
   );

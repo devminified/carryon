@@ -1,46 +1,72 @@
 'use client';
 
-import { useActionState } from 'react';
+import { startTransition, useActionState } from 'react';
+import { Controller, useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { addMemberOverrideAction } from '../data/actions';
+import { addMemberOverrideSchema, type AddMemberOverrideInput } from '../schemas';
 import { useActionToast } from '@/shared/hooks/use-action-toast';
+import { buildFormData } from '@/shared/lib/form-data';
+import { Button } from '@/shared/ui/button';
+import { Input } from '@/shared/ui/input';
+import { Label } from '@/shared/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select';
 
 export function AddMemberForm({ projectId }: { projectId: string }) {
   const [state, action, isPending] = useActionState(addMemberOverrideAction, null);
   useActionToast(state, 'Member added.');
 
+  const {
+    register,
+    control,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<AddMemberOverrideInput>({
+    resolver: zodResolver(addMemberOverrideSchema),
+    defaultValues: { projectId, role: 'viewer' },
+  });
+
+  function onValid(data: AddMemberOverrideInput) {
+    startTransition(() => action(buildFormData(data)));
+  }
+
   return (
-    <form action={action} className="border-border mt-4 flex flex-wrap items-end gap-3 rounded border p-3">
-      <input type="hidden" name="projectId" value={projectId} />
+    <form
+      onSubmit={handleSubmit(onValid)}
+      className="border-border mt-4 flex flex-wrap items-end gap-3 rounded border p-3"
+    >
+      <input type="hidden" {...register('projectId')} />
       <div className="flex flex-col gap-1">
-        <label htmlFor="email" className="text-xs font-medium">
-          Email
-        </label>
+        <Label htmlFor="email">Email</Label>
         {/* suppressHydrationWarning — same Bitwarden-extension-injected-
             attribute mismatch as login-form.tsx: a password manager
             tags type="email" inputs for autofill matching before React
             hydrates. */}
-        <input
-          id="email"
-          name="email"
-          type="email"
-          required
-          suppressHydrationWarning
-          className="border-border rounded border px-2 py-1 text-sm"
-        />
+        <Input id="email" type="email" suppressHydrationWarning {...register('email')} />
+        {errors.email && <p className="text-destructive text-xs">{errors.email.message}</p>}
       </div>
       <div className="flex flex-col gap-1">
-        <label htmlFor="role" className="text-xs font-medium">
-          Role
-        </label>
-        <select id="role" name="role" defaultValue="viewer" className="border-border rounded border px-2 py-1 text-sm">
-          <option value="viewer">viewer</option>
-          <option value="resumer">resumer</option>
-          <option value="admin">admin</option>
-        </select>
+        <Label htmlFor="role">Role</Label>
+        <Controller
+          control={control}
+          name="role"
+          render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange} disabled={field.disabled}>
+              <SelectTrigger id="role" size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="viewer">viewer</SelectItem>
+                <SelectItem value="resumer">resumer</SelectItem>
+                <SelectItem value="admin">admin</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        />
       </div>
-      <button type="submit" disabled={isPending} className="bg-primary text-primary-foreground rounded px-3 py-1.5 text-sm disabled:opacity-50">
+      <Button type="submit" disabled={isPending}>
         {isPending ? 'Adding…' : 'Add manual override'}
-      </button>
+      </Button>
       {state?.error && <p className="text-destructive w-full text-sm">{state.error}</p>}
     </form>
   );
