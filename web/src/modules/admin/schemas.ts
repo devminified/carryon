@@ -64,6 +64,20 @@ export const updateProjectSettingsSchema = z.object({
     .refine((v) => v === null || /^https:\/\/hooks\.slack\.com\/services\//.test(v), {
       message: 'must be a real Slack incoming-webhook URL (https://hooks.slack.com/services/...)',
     }),
+  // Follow-up to CO-409 (#113): unlike Slack, a Mattermost webhook has
+  // no single fixed host — it's whichever server the project's own
+  // (often self-hosted) Mattermost instance runs on, http:// included
+  // for a LAN-only/no-TLS self-hosted setup (the issue's own framing:
+  // this is a self-hosting-adjacent feature). Validated as "looks like
+  // a real Mattermost incoming-webhook URL" (scheme + a /hooks/ path
+  // segment), not tied to one host the way Slack's regex can be.
+  mattermostWebhookUrl: z
+    .string()
+    .trim()
+    .transform((v) => (v === '' ? null : v))
+    .refine((v) => v === null || /^https?:\/\/.+\/hooks\/.+/.test(v), {
+      message: 'must be a real Mattermost incoming-webhook URL (https://<your-mattermost>/hooks/...)',
+    }),
   notifyDigest: z.boolean(),
 });
 export type UpdateProjectSettingsInput = z.infer<typeof updateProjectSettingsSchema>;

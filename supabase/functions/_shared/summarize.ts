@@ -38,6 +38,10 @@ import {
   buildSessionUrl,
   postToSlackWithRetry as realPostToSlackWithRetry,
 } from "./slack.ts";
+import {
+  buildBlockedSessionMessage as buildMattermostBlockedSessionMessage,
+  postToMattermostWithRetry as realPostToMattermostWithRetry,
+} from "./mattermost.ts";
 import { embedText as realEmbedText } from "./embed.ts";
 
 const MAX_API_ATTEMPTS = 3;
@@ -133,6 +137,9 @@ export interface SummarizeDeps {
   // sender below; tests inject a stub to assert on what would have
   // been sent, without ever making a real network call.
   postToSlack?: typeof realPostToSlackWithRetry;
+  // Follow-up to CO-409 (#113): same optional-with-a-real-default
+  // shape, parallel to postToSlack above.
+  postToMattermost?: typeof realPostToMattermostWithRetry;
   // CO-501: same optional-with-a-real-default shape — real callers
   // fall back to the real gte-small embedder; tests inject a small
   // deterministic fake instead. Required here, not optional with a
@@ -544,7 +551,7 @@ async function notifyBlockedSession(
   try {
     const { data: settings, error: settingsErr } = await deps.adminClient
       .from("project_notification_settings")
-      .select("slack_webhook_url")
+      .select("slack_webhook_url, mattermost_webhook_url")
       .eq("project_id", session.project_id)
       .maybeSingle();
     if (settingsErr) {
@@ -554,8 +561,9 @@ async function notifyBlockedSession(
       );
       return;
     }
-    const webhookUrl = settings?.slack_webhook_url;
-    if (!webhookUrl) return;
+    const slackWebhookUrl = settings?.slack_webhook_url;
+    const mattermostWebhookUrl = settings?.mattermost_webhook_url;
+    if (!slackWebhookUrl && !mattermostWebhookUrl) return;
 
     const { data: owner, error: ownerErr } = await deps.adminClient.auth.admin
       .getUserById(session.user_id);
@@ -566,15 +574,36 @@ async function notifyBlockedSession(
       );
     }
     const developerLogin = owner?.user?.user_metadata?.user_name ?? null;
+    const sessionUrl = buildSessionUrl(sessionId);
 
-    const message = buildBlockedSessionMessage({
-      sessionTitle,
-      developerLogin,
-      blockedReason,
-      sessionUrl: buildSessionUrl(sessionId),
-    });
-    const sendSlack = deps.postToSlack ?? realPostToSlackWithRetry;
-    await sendSlack(webhookUrl, message);
+    // Independent fan-out, same reasoning as rescan/send-daily-digest
+    // below: a failed Slack post must never block Mattermost, or vice
+    // versa — each sender already swallows its own failure and
+    // returns a boolean, never throwing, so a plain Promise.all is
+    // enough here (no try/catch needed per branch).
+    const sends: Promise<boolean>[] = [];
+    if (slackWebhookUrl) {
+      const message = buildBlockedSessionMessage({
+        sessionTitle,
+        developerLogin,
+        blockedReason,
+        sessionUrl,
+      });
+      const sendSlack = deps.postToSlack ?? realPostToSlackWithRetry;
+      sends.push(sendSlack(slackWebhookUrl, message));
+    }
+    if (mattermostWebhookUrl) {
+      const message = buildMattermostBlockedSessionMessage({
+        sessionTitle,
+        developerLogin,
+        blockedReason,
+        sessionUrl,
+      });
+      const sendMattermost = deps.postToMattermost ??
+        realPostToMattermostWithRetry;
+      sends.push(sendMattermost(mattermostWebhookUrl, message));
+    }
+    await Promise.all(sends);
   } catch (e) {
     console.error(
       `summarizeSession: blocked-session notification failed for session ${sessionId}`,

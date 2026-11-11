@@ -62,6 +62,16 @@ export function ProjectSettingsForm({ project }: { project: ProjectWithSettings 
         />
       </label>
 
+      <label className="col-span-2 flex flex-col gap-1">
+        <span className="text-xs font-medium">Mattermost webhook URL</span>
+        <input
+          name="mattermostWebhookUrl"
+          defaultValue={project.mattermostWebhookUrl ?? ''}
+          placeholder="https://your-mattermost.example/hooks/…"
+          className="border-border rounded border px-2 py-1"
+        />
+      </label>
+
       <label className="flex items-center gap-2 pt-5">
         <input type="checkbox" name="notifyDigest" defaultChecked={project.notifyDigest} />
         <span>Daily digest</span>

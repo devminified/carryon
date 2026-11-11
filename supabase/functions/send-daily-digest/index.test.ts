@@ -7,6 +7,7 @@ Deno.env.set("DIGEST_CRON_SECRET", CRON_SECRET);
 interface NotificationRow {
   project_id: string;
   slack_webhook_url: string | null;
+  mattermost_webhook_url?: string | null;
   notify_digest: boolean;
 }
 
@@ -17,6 +18,8 @@ interface FakeState {
   logins: Record<string, string | null>;
   // deno-lint-ignore no-explicit-any
   slackMessages: { webhookUrl: string; payload: any }[];
+  // deno-lint-ignore no-explicit-any
+  mattermostMessages: { webhookUrl: string; payload: any }[];
 }
 
 function freshState(overrides: Partial<FakeState> = {}): FakeState {
@@ -26,6 +29,7 @@ function freshState(overrides: Partial<FakeState> = {}): FakeState {
     sessions: [],
     logins: {},
     slackMessages: [],
+    mattermostMessages: [],
     ...overrides,
   };
 }
@@ -37,15 +41,11 @@ function fakeAdminClient(state: FakeState): any {
       if (table === "project_notification_settings") {
         return {
           select: () => ({
-            eq: () => ({
-              not: () =>
-                Promise.resolve({
-                  data: state.notificationSettings.filter(
-                    (n) => n.notify_digest && n.slack_webhook_url !== null,
-                  ),
-                  error: null,
-                }),
-            }),
+            eq: () =>
+              Promise.resolve({
+                data: state.notificationSettings.filter((n) => n.notify_digest),
+                error: null,
+              }),
           }),
         };
       }
@@ -106,6 +106,10 @@ function fakeDeps(
     now: () => now,
     postToSlack: (webhookUrl, payload) => {
       state.slackMessages.push({ webhookUrl, payload });
+      return Promise.resolve(true);
+    },
+    postToMattermost: (webhookUrl, payload) => {
+      state.mattermostMessages.push({ webhookUrl, payload });
       return Promise.resolve(true);
     },
   };
@@ -264,16 +268,114 @@ Deno.test("notifies multiple opted-in projects independently", async () => {
   assertEquals(state.slackMessages.length, 2);
 });
 
+Deno.test("a project with only Mattermost configured gets no Slack calls at all, and vice versa", async () => {
+  const state = freshState({
+    notificationSettings: [
+      {
+        project_id: "p1",
+        slack_webhook_url: "https://hooks.slack.com/p1",
+        mattermost_webhook_url: null,
+        notify_digest: true,
+      },
+      {
+        project_id: "p2",
+        slack_webhook_url: null,
+        mattermost_webhook_url: "http://mattermost.example/hooks/p2",
+        notify_digest: true,
+      },
+    ],
+    projects: [
+      { id: "p1", name: "slack-only" },
+      { id: "p2", name: "mattermost-only" },
+    ],
+    sessions: [
+      {
+        project_id: "p1",
+        user_id: "u1",
+        last_activity_at: "2026-06-15T10:00:00Z",
+      },
+      {
+        project_id: "p2",
+        user_id: "u2",
+        last_activity_at: "2026-06-15T10:00:00Z",
+      },
+    ],
+    logins: { u1: "ali", u2: "sara" },
+  });
+  const res = await handle(req(), fakeDeps(state));
+  assertEquals(await res.json(), { projectsNotified: 2 });
+  assertEquals(state.slackMessages.length, 1);
+  assertEquals(state.slackMessages[0].webhookUrl, "https://hooks.slack.com/p1");
+  assertEquals(state.mattermostMessages.length, 1);
+  assertEquals(
+    state.mattermostMessages[0].webhookUrl,
+    "http://mattermost.example/hooks/p2",
+  );
+});
+
+Deno.test("a project with both webhooks configured gets both", async () => {
+  const state = freshState({
+    notificationSettings: [
+      {
+        project_id: "p1",
+        slack_webhook_url: "https://hooks.slack.com/p1",
+        mattermost_webhook_url: "http://mattermost.example/hooks/p1",
+        notify_digest: true,
+      },
+    ],
+    projects: [{ id: "p1", name: "both-channels" }],
+    sessions: [
+      {
+        project_id: "p1",
+        user_id: "u1",
+        last_activity_at: "2026-06-15T10:00:00Z",
+      },
+    ],
+    logins: { u1: "ali" },
+  });
+  const res = await handle(req(), fakeDeps(state));
+  assertEquals(await res.json(), { projectsNotified: 1 });
+  assertEquals(state.slackMessages.length, 1);
+  assertEquals(state.mattermostMessages.length, 1);
+  const mmBody = state.mattermostMessages[0].payload.attachments[0]
+    .text as string;
+  assert(mmBody.includes("ali: 1 session"));
+});
+
+Deno.test("a failed webhook on one channel doesn't block the other", async () => {
+  const state = freshState({
+    notificationSettings: [
+      {
+        project_id: "p1",
+        slack_webhook_url: "https://hooks.slack.com/p1",
+        mattermost_webhook_url: "http://mattermost.example/hooks/p1",
+        notify_digest: true,
+      },
+    ],
+    projects: [{ id: "p1", name: "both-channels" }],
+    sessions: [
+      {
+        project_id: "p1",
+        user_id: "u1",
+        last_activity_at: "2026-06-15T10:00:00Z",
+      },
+    ],
+    logins: { u1: "ali" },
+  });
+  const deps = fakeDeps(state);
+  deps.postToSlack = () => Promise.resolve(false); // simulated Slack outage — never throws, same as the real sender
+  const res = await handle(req(), deps);
+  assertEquals(await res.json(), { projectsNotified: 1 });
+  assertEquals(state.mattermostMessages.length, 1);
+});
+
 Deno.test("surfaces a notification settings lookup failure as 500", async () => {
   // deno-lint-ignore no-explicit-any
   const deps: any = {
     adminClient: () => ({
       from: () => ({
         select: () => ({
-          eq: () => ({
-            not: () =>
-              Promise.resolve({ data: null, error: { code: "XXXXX" } }),
-          }),
+          eq: () => Promise.resolve({ data: null, error: { code: "XXXXX" } }),
         }),
       }),
     }),

@@ -22,11 +22,14 @@ interface FakeState {
   notificationSettings: {
     project_id: string;
     slack_webhook_url: string | null;
+    mattermost_webhook_url?: string | null;
   }[];
   // deno-lint-ignore no-explicit-any
   auditLog: any[];
   // deno-lint-ignore no-explicit-any
   slackMessages: { webhookUrl: string; payload: any }[];
+  // deno-lint-ignore no-explicit-any
+  mattermostMessages: { webhookUrl: string; payload: any }[];
   storageObjects: Record<string, { bucket: string; bytes: Uint8Array }>;
   downloadErr?: unknown;
   updateObjErr?: unknown;
@@ -41,6 +44,7 @@ function freshState(overrides: Partial<FakeState> = {}): FakeState {
     notificationSettings: [],
     auditLog: [],
     slackMessages: [],
+    mattermostMessages: [],
     storageObjects: {},
     ...overrides,
   };
@@ -208,6 +212,10 @@ function fakeDeps(state: FakeState, overrides: Partial<Deps> = {}): Deps {
       state.slackMessages.push({ webhookUrl, payload });
       return Promise.resolve(true);
     },
+    postToMattermost: (webhookUrl, payload) => {
+      state.mattermostMessages.push({ webhookUrl, payload });
+      return Promise.resolve(true);
+    },
     ...overrides,
   };
 }
@@ -369,6 +377,58 @@ Deno.test("CO-409: a hit also posts to Slack when the project has a webhook conf
   // Never the matched secret value itself, anywhere in the message.
   assertEquals(
     JSON.stringify(state.slackMessages[0].payload).includes("sb_secret_"),
+    false,
+  );
+});
+
+Deno.test("follow-up #113: a hit with both webhooks configured posts to both, and a failed one doesn't block the other", async () => {
+  const objectKey = "p1/u1/s1/main/chunk-0.jsonl.zst";
+  const state = freshState({
+    chunks: [{
+      session_id: "s1",
+      stream_id: "main",
+      seq: 0,
+      object_key: objectKey,
+      uploaded_at: new Date().toISOString(),
+      last_rescanned_at: null,
+    }],
+    sessions: [{ id: "s1", project_id: "p1" }],
+    projects: [{ id: "p1", bucket: null }],
+    notificationSettings: [
+      {
+        project_id: "p1",
+        slack_webhook_url: "https://hooks.slack.com/services/T0/B0/x",
+        mattermost_webhook_url: "http://mattermost.example/hooks/p1",
+      },
+    ],
+  });
+  putObject(
+    state,
+    "carryon-sessions",
+    objectKey,
+    `{"secret":"sb_secret_${"x".repeat(24)}"}\n`,
+  );
+
+  const deps = fakeDeps(state, {
+    postToSlack: () => Promise.resolve(false), // simulated Slack outage — never throws, same as the real sender
+  });
+  const res = await handle(req({}), deps);
+  assertEquals(await res.json(), { scanned: 1, hits: 1 });
+
+  assertEquals(state.mattermostMessages.length, 1);
+  assertEquals(
+    state.mattermostMessages[0].webhookUrl,
+    "http://mattermost.example/hooks/p1",
+  );
+  assert(
+    state.mattermostMessages[0].payload.attachments[0].text.includes(
+      "rotate the affected credential",
+    ),
+  );
+  assertEquals(
+    JSON.stringify(state.mattermostMessages[0].payload).includes(
+      "sb_secret_",
+    ),
     false,
   );
 });

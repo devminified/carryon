@@ -83,6 +83,7 @@ export async function updateProjectSettingsAction(_prev: AdminActionState, formD
     teamResumer: formString(formData, 'teamResumer'),
     teamAdmin: formString(formData, 'teamAdmin'),
     slackWebhookUrl: formString(formData, 'slackWebhookUrl'),
+    mattermostWebhookUrl: formString(formData, 'mattermostWebhookUrl'),
     notifyDigest: formData.get('notifyDigest') === 'on',
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input' };
@@ -113,6 +114,7 @@ export async function updateProjectSettingsAction(_prev: AdminActionState, formD
     {
       project_id: parsed.data.projectId,
       slack_webhook_url: parsed.data.slackWebhookUrl,
+      mattermost_webhook_url: parsed.data.mattermostWebhookUrl,
       notify_digest: parsed.data.notifyDigest,
     },
     { onConflict: 'project_id' },

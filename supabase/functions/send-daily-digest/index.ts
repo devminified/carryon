@@ -27,12 +27,19 @@ import {
   type DigestEntry,
   postToSlackWithRetry as realPostToSlackWithRetry,
 } from "../_shared/slack.ts";
+import {
+  buildDailyDigestMessage as buildMattermostDailyDigestMessage,
+  postToMattermostWithRetry as realPostToMattermostWithRetry,
+} from "../_shared/mattermost.ts";
 
 const DIGEST_WINDOW_HOURS = 24;
 
 export interface Deps {
   adminClient: typeof realAdminClient;
   postToSlack?: typeof realPostToSlackWithRetry;
+  // Follow-up to CO-409 (#113): same optional-with-a-real-default
+  // shape, parallel to postToSlack above.
+  postToMattermost?: typeof realPostToMattermostWithRetry;
   now: () => Date;
 }
 
@@ -43,7 +50,8 @@ const defaultDeps: Deps = {
 
 interface ProjectRow {
   project_id: string;
-  slack_webhook_url: string;
+  slack_webhook_url: string | null;
+  mattermost_webhook_url: string | null;
 }
 
 export async function handle(
@@ -61,12 +69,13 @@ export async function handle(
 
   const admin = deps.adminClient();
   const sendSlack = deps.postToSlack ?? realPostToSlackWithRetry;
+  const sendMattermost = deps.postToMattermost ??
+    realPostToMattermostWithRetry;
 
   const { data: optedInRows, error: optedInErr } = await admin
     .from("project_notification_settings")
-    .select("project_id, slack_webhook_url")
-    .eq("notify_digest", true)
-    .not("slack_webhook_url", "is", null);
+    .select("project_id, slack_webhook_url, mattermost_webhook_url")
+    .eq("notify_digest", true);
   if (optedInErr) {
     console.error(
       "send-daily-digest: notification settings lookup failed",
@@ -74,7 +83,19 @@ export async function handle(
     );
     return errorResponse(500, "internal_error");
   }
-  const optedIn = (optedInRows ?? []) as ProjectRow[];
+  // "at least one webhook configured" — not just Slack's, so a
+  // project with only Mattermost set still gets its digest (#113's
+  // own "a project with only Mattermost configured gets no Slack
+  // calls at all, and vice versa" testing point, applied to this
+  // function's own opt-in filter, not just the per-channel send).
+  // Filtered in JS rather than a second `.or(...)` DB clause — same
+  // "dev stays the post-fetch-in-JS filter" precedent list-sessions
+  // already established (edge-functions.md) — notify_digest=true
+  // rows are few, and this keeps the test double's query-builder
+  // stub from needing to grow an .or() it otherwise never uses.
+  const optedIn = ((optedInRows ?? []) as ProjectRow[]).filter((r) =>
+    r.slack_webhook_url || r.mattermost_webhook_url
+  );
   if (optedIn.length === 0) {
     return json({ projectsNotified: 0 }, 200);
   }
@@ -139,11 +160,29 @@ export async function handle(
       a.developerLogin.localeCompare(b.developerLogin)
     );
 
-    const message = buildDailyDigestMessage({
-      projectName: projectRow.name,
-      entries,
-    });
-    await sendSlack(row.slack_webhook_url, message);
+    // Independent fan-out — a failed Slack post must never block
+    // Mattermost, or vice versa.
+    const sends: Promise<boolean>[] = [];
+    if (row.slack_webhook_url) {
+      sends.push(
+        sendSlack(
+          row.slack_webhook_url,
+          buildDailyDigestMessage({ projectName: projectRow.name, entries }),
+        ),
+      );
+    }
+    if (row.mattermost_webhook_url) {
+      sends.push(
+        sendMattermost(
+          row.mattermost_webhook_url,
+          buildMattermostDailyDigestMessage({
+            projectName: projectRow.name,
+            entries,
+          }),
+        ),
+      );
+    }
+    await Promise.all(sends);
     projectsNotified++;
   }
 

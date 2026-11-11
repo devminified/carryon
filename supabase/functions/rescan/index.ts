@@ -62,6 +62,10 @@ import {
   buildSessionUrl,
   postToSlackWithRetry as realPostToSlackWithRetry,
 } from "../_shared/slack.ts";
+import {
+  buildRescanHitMessage as buildMattermostRescanHitMessage,
+  postToMattermostWithRetry as realPostToMattermostWithRetry,
+} from "../_shared/mattermost.ts";
 
 const Input = z.object({
   // A manual full rescan (no time window, every chunk the "needs
@@ -83,6 +87,9 @@ export interface Deps {
   // SummarizeDeps.postToSlack — real callers fall back to the real
   // Slack sender, tests inject a stub.
   postToSlack?: typeof realPostToSlackWithRetry;
+  // Follow-up to CO-409 (#113): same optional-with-a-real-default
+  // shape, parallel to postToSlack above.
+  postToMattermost?: typeof realPostToMattermostWithRetry;
 }
 
 const defaultDeps: Deps = {
@@ -197,7 +204,7 @@ export async function handle(
 
   const { data: notificationRows, error: notificationErr } = await admin
     .from("project_notification_settings")
-    .select("project_id, slack_webhook_url")
+    .select("project_id, slack_webhook_url, mattermost_webhook_url")
     .in("project_id", projectIDs);
   if (notificationErr) {
     console.error(
@@ -206,10 +213,23 @@ export async function handle(
     );
     return errorResponse(500, "internal_error");
   }
-  const webhookByProject = new Map<string, string | null>(
+  const slackWebhookByProject = new Map<string, string | null>(
     (notificationRows ?? []).map((
-      r: { project_id: string; slack_webhook_url: string | null },
+      r: {
+        project_id: string;
+        slack_webhook_url: string | null;
+        mattermost_webhook_url: string | null;
+      },
     ) => [r.project_id, r.slack_webhook_url]),
+  );
+  const mattermostWebhookByProject = new Map<string, string | null>(
+    (notificationRows ?? []).map((
+      r: {
+        project_id: string;
+        slack_webhook_url: string | null;
+        mattermost_webhook_url: string | null;
+      },
+    ) => [r.project_id, r.mattermost_webhook_url]),
   );
 
   let scanned = 0;
@@ -292,16 +312,32 @@ export async function handle(
             console.error("rescan: audit log insert failed", auditErr.code);
           }
 
-          const webhookUrl = webhookByProject.get(projectID);
-          if (webhookUrl) {
+          const slackWebhookUrl = slackWebhookByProject.get(projectID);
+          const mattermostWebhookUrl = mattermostWebhookByProject.get(
+            projectID,
+          );
+          const sessionUrl = buildSessionUrl(chunk.session_id);
+          // Independent fan-out — a failed Slack post must never
+          // block Mattermost, or vice versa (same reasoning as
+          // summarize.ts's own notifyBlockedSession).
+          const sends: Promise<boolean>[] = [];
+          if (slackWebhookUrl) {
             const sendSlack = deps.postToSlack ?? realPostToSlackWithRetry;
-            await sendSlack(
-              webhookUrl,
-              buildRescanHitMessage({
-                sessionUrl: buildSessionUrl(chunk.session_id),
-              }),
+            sends.push(
+              sendSlack(slackWebhookUrl, buildRescanHitMessage({ sessionUrl })),
             );
           }
+          if (mattermostWebhookUrl) {
+            const sendMattermost = deps.postToMattermost ??
+              realPostToMattermostWithRetry;
+            sends.push(
+              sendMattermost(
+                mattermostWebhookUrl,
+                buildMattermostRescanHitMessage({ sessionUrl }),
+              ),
+            );
+          }
+          await Promise.all(sends);
         }
       } else {
         const { error: markErr } = await admin
