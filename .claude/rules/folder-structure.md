@@ -14,7 +14,8 @@ carryon/
 ├── cmd/
 │   ├── carryon/
 │   │   └── main.go                     the one binary: wires cobra commands to internal/
-│   └── carryon-sign-manifest/          release-side only (CO-308) — never shipped to a laptop; genkey + sign subcommands, see internal/update
+│   ├── carryon-sign-manifest/          release-side only (CO-308) — never shipped to a laptop; genkey + sign subcommands, see internal/update
+│   └── carryon-loadtest/               CO-505's own `make loadtest` tooling — never shipped to a laptop; drives internal/loadtest, see testing.md
 │
 ├── internal/
 │   ├── config/                         ~/.carryon/config.toml (api_url, anon_key, machine_id) — loaded before anything else; machine_id (CO-410) is generated and persisted on first Load() if missing, for the agent's own heartbeat
@@ -36,7 +37,8 @@ carryon/
 │   ├── status/                         `carryon status`'s Report/Gather/Render (CO-113) — reads agent/filter's own status files
 │   ├── logfile/                        daily-rotating JSON log writer (CO-113), 7 kept — what `carryon logs` tails
 │   ├── update/                         CO-308's signed-manifest fetch/verify/stage/self-check/swap/restart — the daily auto-update mechanism
-│   └── service/                        service install per OS (launchd / systemd / Windows Service)
+│   ├── service/                        service install per OS (launchd / systemd / Windows Service)
+│   └── loadtest/                       CO-505's own simulation engine — real agent.Uploader/internal/pull.Rebuild traffic from many simulated developers, metrics, cost extrapolation; see testing.md
 │
 ├── supabase/
 │   ├── config.toml
@@ -127,9 +129,10 @@ carryon/
 │
 ├── install.sh                           CO-308's `curl | sh` installer — downloads, verifies against checksums.txt, extracts, runs `carryon install`
 │
-└── test/
-    └── fixtures/                       sample sessions and repos, including the fake transcript writer used by CI e2e
+└── Makefile                              CO-505's own `make loadtest` target — see testing.md's "Load, soak and cost test" section
 ```
+
+This tree's original plan had a top-level `test/fixtures/` holding "sample sessions and repos, including the fake transcript writer used by CI e2e" — that directory was never actually built that way. The real fixture-writer e2e test lives at `cmd/carryon/e2e_test.go` (a Go test helper, not a standalone fixtures directory — see testing.md's own corrected note), and CO-505's load-test fixtures live in `internal/loadtest/` and `cmd/carryon-loadtest/` instead, listed above.
 
 ## Rules About This Structure
 
