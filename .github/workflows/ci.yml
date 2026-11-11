@@ -132,6 +132,28 @@ jobs:
             exit 1
           fi
 
+  # `pnpm exec playwright install --with-deps chromium` used to shell
+  # out to apt for Chromium's recommended font packages
+  # (xfonts-utils, fonts-ipafont-gothic, ...) straight from Ubuntu's
+  # own mirrors (security.ubuntu.com/archive.ubuntu.com) — a real,
+  # repeat (3x in a row, 2026-11-11) DNS-resolution flake on those
+  # mirrors from the runner's network, unrelated to this repo's code.
+  # Switched to running the actual test step inside Microsoft's own
+  # Playwright image, pinned to the exact @playwright/test version in
+  # pnpm-lock.yaml (`docker run` against mcr.microsoft.com, not
+  # Ubuntu's package mirrors) — it ships Chromium plus every one of
+  # those system dependencies pre-baked, so this job no longer calls
+  # apt at all. `supabase start` still runs directly on the runner (it
+  # needs the host's own Docker daemon for its own containers);
+  # `--network host` on the Playwright container is what lets it reach
+  # that already-running stack via the same 127.0.0.1 ports. The image
+  # ships Node 26 with no corepack (removed from recent Node core), so
+  # `npm install -g pnpm` substitutes for `corepack enable` here; a
+  # fresh `pnpm install` always runs inside the container rather than
+  # reusing the host's own node_modules — several of this project's
+  # deps (sharp, @next/swc, lightningcss, ...) ship Node-ABI-specific
+  # native binaries, and nothing here has verified those stay
+  # binary-compatible across Node 22 (the host) and 26 (this image).
   web-e2e:
     runs-on: ubuntu-latest
     steps:
@@ -154,20 +176,32 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: web
-      - run: pnpm exec playwright install --with-deps chromium
+      - name: seed e2e fixtures
+        # Normally pnpm test:e2e's own pretest:e2e hook does this (see
+        # web/package.json) — done as its own explicit step here
+        # because the real test run below happens inside a separate
+        # container, which never triggers this host-side npm lifecycle
+        # hook.
+        run: pnpm run seed:e2e
         working-directory: web
-      - run: pnpm test:e2e
+      - name: run Playwright inside the official Playwright image
         working-directory: web
+        run: |
+          docker run --rm --network host \
+            -e CI=true \
+            -e NEXT_PUBLIC_SUPABASE_URL \
+            -e NEXT_PUBLIC_SUPABASE_ANON_KEY \
+            -e SUPABASE_SERVICE_ROLE_KEY \
+            -v "$PWD:/work" -w /work \
+            mcr.microsoft.com/playwright:v1.65.0-noble \
+            sh -c "npm install -g pnpm@10.17.1 && pnpm install --frozen-lockfile && pnpm exec playwright test"
         env:
           NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54421
           NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
           # CO-402's modules/sessions/data/queries.ts resolves developer
           # logins via the admin client (architecture.md's "RLS can't
           # express this" exception) — needed for real here, not just
-          # for the `web` job's leak check. pnpm test:e2e's own
-          # pretest:e2e hook seeds both CO-402's and CO-403's real
-          # fixture data (web/e2e/seed.sql, seed-viewer-fixtures.mjs)
-          # before Playwright runs — see web/package.json.
+          # for the `web` job's leak check.
           SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
       - uses: actions/upload-artifact@v4
         if: failure()
