@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
+import { Toaster } from '@/shared/ui/sonner';
 import './globals.css';
 
 const geistSans = Geist({
@@ -28,6 +29,12 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
           hydrates. It never masks a real mismatch deeper in the tree. */}
       <body className="flex min-h-full flex-col" suppressHydrationWarning>
         {children}
+        {/* No next-themes provider is mounted (CO-602: no manual
+            light/dark toggle in this phase) — sonner's generated
+            Toaster defaults its theme prop to "system", which follows
+            prefers-color-scheme directly, matching this app's own
+            approach with no extra wiring needed. */}
+        <Toaster />
       </body>
     </html>
   );

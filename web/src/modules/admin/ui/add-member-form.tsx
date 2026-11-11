@@ -2,9 +2,11 @@
 
 import { useActionState } from 'react';
 import { addMemberOverrideAction } from '../data/actions';
+import { useActionToast } from '@/shared/hooks/use-action-toast';
 
 export function AddMemberForm({ projectId }: { projectId: string }) {
   const [state, action, isPending] = useActionState(addMemberOverrideAction, null);
+  useActionToast(state, 'Member added.');
 
   return (
     <form action={action} className="border-border mt-4 flex flex-wrap items-end gap-3 rounded border p-3">

@@ -161,7 +161,12 @@ test.describe.serial('admin pages (CO-410)', () => {
     await page.getByLabel('Git remote (host/owner/repo)').fill(NEW_PROJECT_REMOTE);
     await page.getByRole('button', { name: 'Register project' }).click();
 
-    await expect(page.getByText(/already registered/)).toBeVisible();
+    // CO-603: the same server error now renders in two places — the
+    // form's own persistent inline text, and an auto-dismissing toast
+    // (identical wording, since both render the same state.error) —
+    // .first() targets the inline one, matching this test's original
+    // intent.
+    await expect(page.getByText(/already registered/).first()).toBeVisible();
   });
 
   test("an admin can edit the new project's settings, and they persist across a reload", async ({
@@ -414,7 +419,9 @@ test.describe.serial('admin pages (CO-410)', () => {
     await page.getByLabel(/Extra path denylist globs/).fill('**/co410-e2e-secrets/**');
     await page.getByLabel(/Pinned agent version/).fill('1.4.0');
     await page.getByRole('button', { name: 'Save config' }).click();
-    await expect(page.getByText('Saved.')).toBeVisible();
+    // CO-603: same toast-vs-inline-text overlap as the registration
+    // test above — .first() targets the persistent inline message.
+    await expect(page.getByText('Saved.').first()).toBeVisible();
 
     await page.reload();
     await expect(page.getByLabel(/Disabled rule IDs/)).toHaveValue(
@@ -442,7 +449,7 @@ test.describe.serial('admin pages (CO-410)', () => {
     await page.getByLabel(/Pinned agent version/).fill('9.9.9-no-compat-run');
     await page.getByRole('button', { name: 'Save config' }).click();
 
-    await expect(page.getByText(/no green Claude Code compatibility run/)).toBeVisible();
+    await expect(page.getByText(/no green Claude Code compatibility run/).first()).toBeVisible();
 
     const configRows = await restGet('redaction_config?id=eq.default&select=pinned_version');
     expect(configRows[0].pinned_version).not.toBe('9.9.9-no-compat-run');

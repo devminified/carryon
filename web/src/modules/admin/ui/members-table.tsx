@@ -3,10 +3,13 @@
 import { useActionState } from 'react';
 import { removeMemberAction, updateMemberRoleAction } from '../data/actions';
 import type { MemberWithLogin } from '../types';
+import { useActionToast } from '@/shared/hooks/use-action-toast';
 
 function MemberRow({ member }: { member: MemberWithLogin }) {
   const [roleState, roleAction, roleIsPending] = useActionState(updateMemberRoleAction, null);
-  const [, removeAction, removeIsPending] = useActionState(removeMemberAction, null);
+  const [removeState, removeAction, removeIsPending] = useActionState(removeMemberAction, null);
+  useActionToast(roleState, 'Role updated.');
+  useActionToast(removeState, 'Member removed.');
 
   return (
     <tr className="border-border border-b">

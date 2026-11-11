@@ -2,6 +2,7 @@
 
 import { useActionState } from 'react';
 import { resummarizeSessionAction } from '../data/actions';
+import { useActionToast } from '@/shared/hooks/use-action-toast';
 
 // CO-408: admin-only "Re-summarize" for the session list — same
 // visibility reasoning as PinButton (RLS/the Edge Function's own
@@ -21,6 +22,10 @@ export function ResummarizeButton({
   projectId: string;
 }) {
   const [state, action, isPending] = useActionState(resummarizeSessionAction, null);
+  // Honest, not optimistic (see CO-607's own note on this button): the
+  // real summary only arrives once Realtime delivers it, so this just
+  // confirms the request was accepted, not that a new summary exists.
+  useActionToast(state, 'Re-summarize requested — the new summary will appear shortly.');
 
   return (
     <form action={action}>

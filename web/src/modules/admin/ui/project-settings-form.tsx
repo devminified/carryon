@@ -3,9 +3,11 @@
 import { useActionState } from 'react';
 import { updateProjectSettingsAction } from '../data/actions';
 import type { ProjectWithSettings } from '../types';
+import { useActionToast } from '@/shared/hooks/use-action-toast';
 
 export function ProjectSettingsForm({ project }: { project: ProjectWithSettings }) {
   const [state, action, isPending] = useActionState(updateProjectSettingsAction, null);
+  useActionToast(state, 'Settings saved.');
 
   return (
     <form action={action} className="grid grid-cols-2 gap-3 pt-3 text-sm md:grid-cols-3">
