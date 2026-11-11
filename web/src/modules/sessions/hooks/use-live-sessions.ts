@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@/shared/lib/supabase/client';
+import { useLiveNow } from '@/shared/hooks/use-live-now';
 import type { SessionListFilters, SessionListItem, SessionRow } from '../types';
 
 function rowMatchesFilters(row: SessionRow, filters: SessionListFilters): boolean {
@@ -73,6 +74,11 @@ export function useLiveSessions(
   initialItems: SessionListItem[],
   filters: SessionListFilters,
   isFirstPage: boolean,
+  // CO-601: server-computed, so the SSR pass and the first client
+  // hydration pass render the same instant — see useLiveNow's own
+  // comment for why a bare client-side `Date.now()` here caused a
+  // real hydration mismatch.
+  initialNow: string,
 ) {
   // Adjusting state when a prop changes (react.dev's own pattern for
   // this, not an effect) — a navigation to a new page/filter hands this
@@ -85,17 +91,12 @@ export function useLiveSessions(
     setItems(initialItems);
   }
 
-  const [now, setNow] = useState(() => Date.now());
+  const now = useLiveNow(initialNow);
   const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>('idle');
   const itemsRef = useRef(items);
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
-
-  useEffect(() => {
-    const tick = setInterval(() => setNow(Date.now()), 15_000);
-    return () => clearInterval(tick);
-  }, []);
 
   useEffect(() => {
     const supabase = createClient();

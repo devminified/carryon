@@ -19,6 +19,11 @@ export function AgentsTable({ heartbeats }: { heartbeats: HeartbeatWithLogin[] }
     return <p className="text-muted-foreground mt-4 text-sm">No agent has checked in yet.</p>;
   }
 
+  // A Server Component renders exactly once, server-side — computing
+  // `now` here (rather than defaulting inside formatRelativeTime,
+  // CO-601) is always safe, never hydrated against a second instant.
+  const now = new Date();
+
   return (
     <table className="mt-4 w-full text-left text-sm">
       <thead>
@@ -47,10 +52,10 @@ export function AgentsTable({ heartbeats }: { heartbeats: HeartbeatWithLogin[] }
             <td className="py-2">{h.os ?? '—'}</td>
             <td className="py-2">{h.version}</td>
             <td className="py-2" title={h.last_seen_at}>
-              {formatRelativeTime(h.last_seen_at)}
+              {formatRelativeTime(h.last_seen_at, now)}
             </td>
             <td className="py-2" title={h.last_upload_at ?? undefined}>
-              {h.last_upload_at ? formatRelativeTime(h.last_upload_at) : '—'}
+              {h.last_upload_at ? formatRelativeTime(h.last_upload_at, now) : '—'}
             </td>
             <td className="py-2">{formatBytes(h.bytes_behind)}</td>
             <td className="py-2">{h.blocked_sessions}</td>

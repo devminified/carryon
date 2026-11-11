@@ -6,6 +6,11 @@ export function AuditTable({ rows }: { rows: AuditLogEntry[] }) {
     return <p className="text-muted-foreground mt-4 text-sm">No audit rows match these filters.</p>;
   }
 
+  // A Server Component renders exactly once, server-side — computing
+  // `now` here (rather than defaulting inside formatRelativeTime,
+  // CO-601) is always safe, never hydrated against a second instant.
+  const now = new Date();
+
   return (
     <table className="mt-4 w-full text-left text-sm">
       <thead>
@@ -21,7 +26,7 @@ export function AuditTable({ rows }: { rows: AuditLogEntry[] }) {
         {rows.map((row) => (
           <tr key={row.id} className="border-border border-b">
             <td className="py-2" title={row.at}>
-              {formatRelativeTime(row.at)}
+              {formatRelativeTime(row.at, now)}
             </td>
             <td className="py-2">{row.action}</td>
             <td className="py-2">{row.actorLogin ?? row.actor ?? '—'}</td>
