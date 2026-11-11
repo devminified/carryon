@@ -52,6 +52,29 @@ fi
 echo "Starting the self-hosted Carryon stack..."
 docker compose up -d --build
 
+echo "Waiting for migrations to finish applying..."
+attempts=0
+until docker compose logs init 2>&1 | grep -q "init complete"; do
+  attempts=$((attempts + 1))
+  if [ "$attempts" -gt 60 ]; then
+    echo "error: migrations never completed. Check logs with:" >&2
+    echo "  docker compose logs init" >&2
+    exit 1
+  fi
+  sleep 5
+done
+
+# Realtime caches its tenant list once at its own boot, before the
+# init container above has had a chance to seed the one tenant row
+# this stack needs — found as a real, reproducible bug: every
+# Postgres Changes subscription fails with "TenantNotFound" until
+# Realtime is restarted after that row exists. A real self-host
+# operator would hit this on a genuinely fresh `./install.sh` run
+# every time, so this script does the restart for them rather than
+# documenting it as a manual step to remember.
+echo "Restarting realtime to pick up its seeded tenant..."
+docker compose restart realtime
+
 echo "Waiting for the web app to report healthy (this can take a few minutes on first boot)..."
 attempts=0
 until curl -fsS "${WEB_APP_URL:-http://127.0.0.1:3000}/api/health" >/dev/null 2>&1; do

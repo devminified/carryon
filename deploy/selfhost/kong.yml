@@ -59,9 +59,17 @@ services:
           - /storage/v1
     plugins:
       - name: cors
-      - name: key-auth
-        config:
-          hide_credentials: true
+    # Deliberately NO key-auth here, unlike rest-v1/realtime-v1 above
+    # — a real upload failed with a 401 from Kong itself (never
+    # reaching storage-api at all, confirmed by its own request log
+    # showing no PUT) until this was removed. The actual signed PUT
+    # to a chunk's upload URL (internal/api.Client.StorageUploadURL)
+    # carries its auth as a `?token=` query param, not an apikey
+    # header or query param Kong's key-auth plugin would recognize —
+    # storage-api itself verifies that token; Kong's own key-auth
+    # would reject every such request before it ever gets there.
+    # Matches Supabase's own published self-hosting kong.yml, which
+    # doesn't key-auth this route either, for the same reason.
 
   - name: functions-v1
     url: http://edge-functions:9000

@@ -79,6 +79,16 @@ services:
       API_EXTERNAL_URL: ${SUPABASE_PUBLIC_URL}
       GOTRUE_JWT_SECRET: ${JWT_SECRET}
       GOTRUE_JWT_EXP: 3600
+      # Without this, GoTrue's own user-lookup query for every grant
+      # type (password, refresh, etc.) filters "aud = ''" instead of
+      # "aud = 'authenticated'" — confirmed directly with debug-level
+      # GoTrue logging showing the real SQL and its bound params — so
+      # every real login fails with a generic "Invalid login
+      # credentials" no matter how correct the seeded user/password
+      # hash is. Must match seed.sql's own `aud` column value exactly
+      # ('authenticated', the same value this repo's migrations and
+      # every ANON_KEY/SERVICE_ROLE_KEY's own `role` claim already use).
+      GOTRUE_JWT_AUD: authenticated
       GOTRUE_DISABLE_SIGNUP: "false"
       # Defaults to off — GoTrue needs a real client id/secret to
       # start this provider cleanly, and an operator (or a CI run with
@@ -393,6 +403,11 @@ services:
       DB_URL: postgres://supabase_admin:${POSTGRES_PASSWORD}@db:5432/postgres
       SUPABASE_URL: http://kong:8000
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      # Both only for apply.sh's own realtime tenant/extension seeding
+      # step (see that file's own comment) — not used by the carryon
+      # migrations themselves.
+      JWT_SECRET: ${JWT_SECRET}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     restart: "no"
 
   web:

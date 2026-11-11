@@ -155,6 +155,35 @@ is the first thing to check, and the current workaround is a GoTrue
 version bump if/when GoTrue itself adds a configurable API host for this
 call — not something this stack can fix on its own today.
 
+## Known issue: live (no-reload) session list updates don't work yet
+
+CO-402's own Realtime-powered "live sessions update through Supabase
+Realtime" does not currently work against this self-hosted stack —
+every other capability (capture, `carryon pull`/resume, redaction,
+RLS, Storage uploads/downloads, Auth/sign-in, every Edge Function,
+the admin console, semantic/file search, AI summaries) is verified
+working end to end against a real local run of this exact compose
+file, including the real Go and Playwright e2e suites; only this one
+feature is affected, and a plain page reload still shows fully
+correct, up-to-date data.
+
+What's confirmed so far: the self-hosted `realtime` service needs a
+`_realtime.tenants`/`_realtime.extensions` row (`init/apply.sh` seeds
+one automatically, keyed by `external_id = 'realtime'` — the value
+Kong's own default `preserve_host: false` behavior causes Realtime to
+see as the request's effective hostname). With that row seeded, a raw
+WebSocket handshake to `/realtime/v1/websocket` through Kong still
+gets a bare `403 Forbidden`, and Realtime's own debug logs show it
+re-querying Postgres, finding a row that matches on every column, and
+still logging `TenantNotFound` immediately after — ruling out a stale
+boot-time cache (confirmed by testing against a freshly restarted
+container with the row already in place beforehand). This points to
+something past the row lookup itself inside Realtime's own compiled
+Elixir internals (no accessible source beyond its shipped `seeds.exs`,
+which inserts an equivalent row through the same Ecto `Repo.insert!`
+call) — tracked as an open issue, not quietly worked around. If you
+get this working, please open a PR updating this section.
+
 ## AI summaries
 
 Off by default (`AI_ENABLED=false` in `.env.example`). Set
