@@ -179,6 +179,12 @@ test.describe.serial('admin pages (CO-410)', () => {
     await row
       .getByLabel('Slack webhook URL')
       .fill('https://hooks.slack.com/services/T0/B0/co410e2e');
+    // Follow-up to CO-409 (#113): the Mattermost field is independent
+    // of Slack's — both can be set at once, same reasoning the
+    // migration and Edge Function fan-out already apply.
+    await row
+      .getByLabel('Mattermost webhook URL')
+      .fill('https://mattermost.example/hooks/co410e2e');
     await row.getByLabel('Daily digest').check();
     await row.getByRole('button', { name: 'Save settings' }).click();
     await expect(row.getByText('Saved.')).toBeVisible();
@@ -191,6 +197,9 @@ test.describe.serial('admin pages (CO-410)', () => {
     await expect(reloadedRow.getByLabel('Daily AI token budget')).toHaveValue('50000');
     await expect(reloadedRow.getByLabel('Slack webhook URL')).toHaveValue(
       'https://hooks.slack.com/services/T0/B0/co410e2e',
+    );
+    await expect(reloadedRow.getByLabel('Mattermost webhook URL')).toHaveValue(
+      'https://mattermost.example/hooks/co410e2e',
     );
     await expect(reloadedRow.getByLabel('Daily digest')).toBeChecked();
   });

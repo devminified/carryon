@@ -13,6 +13,7 @@ export type RedactionConfigRow = Database['public']['Tables']['redaction_config'
 // see data/queries.ts's listProjectsWithSettings.
 export type ProjectWithSettings = ProjectRow & {
   slackWebhookUrl: string | null;
+  mattermostWebhookUrl: string | null;
   notifyDigest: boolean;
 };
 

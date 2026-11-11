@@ -27,8 +27,11 @@ interface FakeOpts {
   anthropicResponses?: Array<AnthropicResult | Error>;
   onUpdate?: (patch: Record<string, unknown>) => void;
   onUsageInsert?: (row: Record<string, unknown>) => void;
-  // CO-409
-  notificationSettings?: { slack_webhook_url: string | null } | null;
+  // CO-409 / follow-up #113
+  notificationSettings?: {
+    slack_webhook_url: string | null;
+    mattermost_webhook_url?: string | null;
+  } | null;
   ownerLogin?: string | null;
   ownerLookupError?: unknown;
   // CO-501
@@ -246,6 +249,8 @@ async function buildDeps(
   opts: FakeOpts,
   // deno-lint-ignore no-explicit-any
   postToSlack?: (webhookUrl: string, payload: any) => Promise<boolean>,
+  // deno-lint-ignore no-explicit-any
+  postToMattermost?: (webhookUrl: string, payload: any) => Promise<boolean>,
 ): Promise<SummarizeDeps> {
   const admin = await fakeAdmin(opts);
   return {
@@ -262,6 +267,7 @@ async function buildDeps(
     sleep: () => Promise.resolve(),
     now: () => new Date("2026-06-15T12:00:00Z"),
     postToSlack,
+    postToMattermost,
     embedText: fakeEmbedText,
   };
 }
@@ -560,6 +566,82 @@ Deno.test("CO-409: notifies Slack on the transition into blocked, when a webhook
   assertEquals(sent?.webhookUrl, "https://hooks.slack.com/services/T0/B0/x");
   assert(sent?.payload.text.includes("waiting on API credentials"));
   assert(sent?.payload.text.includes("ali's session"));
+});
+
+Deno.test("follow-up #113: notifies Mattermost on the transition into blocked, when only a Mattermost webhook is configured", async () => {
+  // deno-lint-ignore no-explicit-any
+  let sent: any = null;
+  let slackPosts = 0;
+  const deps = await buildDeps(
+    {
+      chunkTexts: ["line one\n"],
+      anthropicResponses: [
+        {
+          text: validResponseText({
+            outcome: "blocked",
+            blocked_reason: "waiting on API credentials",
+          }),
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ],
+      notificationSettings: {
+        slack_webhook_url: null,
+        mattermost_webhook_url: "http://mattermost.example/hooks/x",
+      },
+      ownerLogin: "ali",
+    },
+    () => {
+      slackPosts++;
+      return Promise.resolve(true);
+    },
+    (webhookUrl, payload) => {
+      sent = { webhookUrl, payload };
+      return Promise.resolve(true);
+    },
+  );
+  const outcome = await summarizeSession(deps, SESSION_ID);
+  assertEquals(outcome, { status: "summarized" });
+  assertEquals(slackPosts, 0);
+  assertEquals(sent?.webhookUrl, "http://mattermost.example/hooks/x");
+  assert(
+    sent?.payload.attachments[0].text.includes("waiting on API credentials"),
+  );
+});
+
+Deno.test("follow-up #113: a project with both webhooks configured gets both, and a failed one doesn't block the other", async () => {
+  let slackPosts = 0;
+  let mattermostPosts = 0;
+  const deps = await buildDeps(
+    {
+      chunkTexts: ["line one\n"],
+      anthropicResponses: [
+        {
+          text: validResponseText({
+            outcome: "blocked",
+            blocked_reason: "waiting on API credentials",
+          }),
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ],
+      notificationSettings: {
+        slack_webhook_url: "https://hooks.slack.com/services/T0/B0/x",
+        mattermost_webhook_url: "http://mattermost.example/hooks/x",
+      },
+      ownerLogin: "ali",
+    },
+    () => {
+      slackPosts++;
+      return Promise.resolve(false); // simulated Slack outage — never throws, same as the real sender
+    },
+    () => {
+      mattermostPosts++;
+      return Promise.resolve(true);
+    },
+  );
+  const outcome = await summarizeSession(deps, SESSION_ID);
+  assertEquals(outcome, { status: "summarized" });
+  assertEquals(slackPosts, 1);
+  assertEquals(mattermostPosts, 1);
 });
 
 Deno.test("CO-409: sends no Slack message when the project has no webhook configured", async () => {

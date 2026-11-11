@@ -292,16 +292,19 @@ export type Database = {
       }
       project_notification_settings: {
         Row: {
+          mattermost_webhook_url: string | null
           notify_digest: boolean
           project_id: string
           slack_webhook_url: string | null
         }
         Insert: {
+          mattermost_webhook_url?: string | null
           notify_digest?: boolean
           project_id: string
           slack_webhook_url?: string | null
         }
         Update: {
+          mattermost_webhook_url?: string | null
           notify_digest?: boolean
           project_id?: string
           slack_webhook_url?: string | null

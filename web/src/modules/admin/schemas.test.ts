@@ -45,6 +45,7 @@ describe('updateProjectSettingsSchema', () => {
     teamResumer: '',
     teamAdmin: '',
     slackWebhookUrl: '',
+    mattermostWebhookUrl: '',
     notifyDigest: false,
   };
 
@@ -53,6 +54,7 @@ describe('updateProjectSettingsSchema', () => {
     expect(result.bucket).toBeNull();
     expect(result.teamViewer).toBeNull();
     expect(result.slackWebhookUrl).toBeNull();
+    expect(result.mattermostWebhookUrl).toBeNull();
   });
 
   it('coerces numeric strings from form fields', () => {
@@ -75,6 +77,20 @@ describe('updateProjectSettingsSchema', () => {
 
   it('rejects a URL that is not a Slack webhook', () => {
     expect(() => updateProjectSettingsSchema.parse({ ...base, slackWebhookUrl: 'https://evil.example/hook' })).toThrow();
+  });
+
+  it('accepts a real Mattermost incoming-webhook URL, including self-hosted http', () => {
+    const result = updateProjectSettingsSchema.parse({
+      ...base,
+      mattermostWebhookUrl: 'http://mattermost.internal/hooks/abc123',
+    });
+    expect(result.mattermostWebhookUrl).toBe('http://mattermost.internal/hooks/abc123');
+  });
+
+  it('rejects a Mattermost URL missing the /hooks/ path', () => {
+    expect(() =>
+      updateProjectSettingsSchema.parse({ ...base, mattermostWebhookUrl: 'https://mattermost.internal/not-a-webhook' }),
+    ).toThrow();
   });
 });
 

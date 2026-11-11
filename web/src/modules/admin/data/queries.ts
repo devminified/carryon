@@ -52,19 +52,24 @@ export async function listAllProjects(): Promise<ProjectWithSettings[]> {
 
   const { data: settingsRows, error: settingsErr } = await admin
     .from('project_notification_settings')
-    .select('project_id, slack_webhook_url, notify_digest');
+    .select('project_id, slack_webhook_url, mattermost_webhook_url, notify_digest');
   if (settingsErr) throw settingsErr;
 
   const settingsByProject = new Map(
     (settingsRows ?? []).map((s) => [
       s.project_id,
-      { slackWebhookUrl: s.slack_webhook_url, notifyDigest: s.notify_digest },
+      {
+        slackWebhookUrl: s.slack_webhook_url,
+        mattermostWebhookUrl: s.mattermost_webhook_url,
+        notifyDigest: s.notify_digest,
+      },
     ]),
   );
 
   return (projects as ProjectRow[]).map((p) => ({
     ...p,
     slackWebhookUrl: settingsByProject.get(p.id)?.slackWebhookUrl ?? null,
+    mattermostWebhookUrl: settingsByProject.get(p.id)?.mattermostWebhookUrl ?? null,
     notifyDigest: settingsByProject.get(p.id)?.notifyDigest ?? false,
   }));
 }
