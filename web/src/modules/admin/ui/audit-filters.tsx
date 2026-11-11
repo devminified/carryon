@@ -1,3 +1,6 @@
+import { Button } from '@/shared/ui/button';
+import { Input } from '@/shared/ui/input';
+
 // A plain GET <form> — reloading the page with query params is the
 // whole filter mechanism, no client JS needed (data-fetching.md:
 // Server Components fetch, this page included). The CSV export link
@@ -5,6 +8,13 @@
 // "CSV export matches the filtered view" (this ticket's own testing
 // point) true by construction rather than by keeping two filter
 // implementations in sync.
+//
+// CO-604: the <select>s and <label>s here stay native, not shadcn's
+// <Select>/<Label> — both of those are Radix-backed Client Components,
+// and adopting them would force this whole page to become one too,
+// defeating the zero-JS design above. Button and Input are both RSC-
+// safe (no 'use client' in either's generated source) so those two
+// swap in without that cost.
 export function AuditFilters({
   actions,
   projects,
@@ -22,7 +32,7 @@ export function AuditFilters({
     <form method="get" className="border-border mb-4 flex flex-wrap items-end gap-3 border-b pb-4">
       <label className="flex flex-col gap-1">
         <span className="text-xs font-medium">Actor email</span>
-        <input name="actorEmail" defaultValue={current.actorEmail ?? ''} className="border-border rounded border px-2 py-1 text-sm" />
+        <Input name="actorEmail" defaultValue={current.actorEmail ?? ''} className="w-auto" />
       </label>
       <label className="flex flex-col gap-1">
         <span className="text-xs font-medium">Action</span>
@@ -48,15 +58,13 @@ export function AuditFilters({
       </label>
       <label className="flex flex-col gap-1">
         <span className="text-xs font-medium">Since</span>
-        <input type="date" name="since" defaultValue={current.since ?? ''} className="border-border rounded border px-2 py-1 text-sm" />
+        <Input type="date" name="since" defaultValue={current.since ?? ''} className="w-auto" />
       </label>
       <label className="flex flex-col gap-1">
         <span className="text-xs font-medium">Until</span>
-        <input type="date" name="until" defaultValue={current.until ?? ''} className="border-border rounded border px-2 py-1 text-sm" />
+        <Input type="date" name="until" defaultValue={current.until ?? ''} className="w-auto" />
       </label>
-      <button type="submit" className="bg-primary text-primary-foreground rounded px-3 py-1.5 text-sm">
-        Apply filters
-      </button>
+      <Button type="submit">Apply filters</Button>
       <a
         href={`/api/admin/audit/export${exportQuery ? `?${exportQuery}` : ''}`}
         className="text-muted-foreground hover:text-foreground text-sm underline"

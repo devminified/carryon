@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { ContentBlock } from '../lib/parse-transcript';
 import { summarizeToolCall } from '../lib/tool-summary';
+import { Button } from '@/shared/ui/button';
 import { DiffView } from './diff-view';
 import { HighlightedPre } from './highlighted-text';
 
@@ -30,10 +31,11 @@ export function ToolCall({
 
   return (
     <div className="border-border my-1 rounded border">
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={() => setOpen((v) => !v)}
-        className="text-foreground hover:bg-border/30 flex w-full items-center gap-2 px-2 py-1 text-left text-sm"
+        className="h-auto w-full justify-start gap-2 rounded-none px-2 py-1 text-sm font-normal"
       >
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>
         <span className="font-mono">{summary}</span>
@@ -43,7 +45,7 @@ export function ToolCall({
           </span>
         )}
         {!result && <span className="text-muted-foreground text-xs">running…</span>}
-      </button>
+      </Button>
       {open && (
         <div className="border-border border-t p-2">
           {isEdit ? (

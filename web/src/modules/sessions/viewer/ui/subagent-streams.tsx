@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { ManifestChunk } from '../lib/fetch-transcript';
+import { Button } from '@/shared/ui/button';
 import { TranscriptView } from './transcript-view';
 
 export function SubagentStreams({
@@ -41,14 +42,15 @@ function SubagentSection({
   const [open, setOpen] = useState(false);
   return (
     <div className="border-border rounded border">
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={() => setOpen((v) => !v)}
-        className="text-foreground hover:bg-border/30 flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm"
+        className="h-auto w-full justify-start gap-2 rounded-none px-2 py-1.5 text-sm font-normal"
       >
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>
         Subagent: {streamId}
-      </button>
+      </Button>
       {open && (
         <div className="border-border border-t p-2">
           <TranscriptView apiUrl={apiUrl} chunks={chunks} />

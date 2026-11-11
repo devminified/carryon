@@ -3,6 +3,7 @@
 import { useActionState } from 'react';
 import { resummarizeSessionAction } from '../data/actions';
 import { useActionToast } from '@/shared/hooks/use-action-toast';
+import { Button } from '@/shared/ui/button';
 
 // CO-408: admin-only "Re-summarize" for the session list — same
 // visibility reasoning as PinButton (RLS/the Edge Function's own
@@ -31,17 +32,19 @@ export function ResummarizeButton({
     <form action={action}>
       <input type="hidden" name="sessionId" value={sessionId} />
       <input type="hidden" name="projectId" value={projectId} />
-      <button
+      <Button
         type="submit"
+        variant="link"
+        size="xs"
         disabled={isPending}
         title={
           state?.error ??
           (isPending ? 'Summarizing…' : 'Ask the AI to re-summarize this session')
         }
-        className="text-muted-foreground hover:text-foreground text-xs underline disabled:opacity-50"
+        className="text-muted-foreground hover:text-foreground h-auto p-0 text-xs"
       >
         {isPending ? 'Summarizing…' : 'Re-summarize'}
-      </button>
+      </Button>
       {state?.error && <p className="text-destructive text-xs">{state.error}</p>}
     </form>
   );
