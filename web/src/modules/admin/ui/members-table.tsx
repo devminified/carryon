@@ -7,6 +7,7 @@ import { useActionToast } from '@/shared/hooks/use-action-toast';
 import { buildFormData } from '@/shared/lib/form-data';
 import { Button } from '@/shared/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/ui/table';
 
 function MemberRow({ member }: { member: MemberWithLogin }) {
   const [roleState, roleAction, roleIsPending] = useActionState(updateMemberRoleAction, null);
@@ -30,9 +31,9 @@ function MemberRow({ member }: { member: MemberWithLogin }) {
   }
 
   return (
-    <tr className="border-border border-b">
-      <td className="py-2">{member.login ?? member.email ?? member.user_id}</td>
-      <td className="py-2">
+    <TableRow>
+      <TableCell>{member.login ?? member.email ?? member.user_id}</TableCell>
+      <TableCell>
         <Select value={member.role} disabled={roleIsPending} onValueChange={onRoleChange}>
           <SelectTrigger size="sm">
             <SelectValue />
@@ -44,9 +45,9 @@ function MemberRow({ member }: { member: MemberWithLogin }) {
           </SelectContent>
         </Select>
         {roleState?.error && <span className="text-destructive ml-2 text-xs">{roleState.error}</span>}
-      </td>
-      <td className="text-muted-foreground py-2 text-xs">{member.source}</td>
-      <td className="py-2">
+      </TableCell>
+      <TableCell className="text-muted-foreground text-xs">{member.source}</TableCell>
+      <TableCell>
         <form action={removeAction} className="inline">
           <input type="hidden" name="projectId" value={member.project_id} />
           <input type="hidden" name="userId" value={member.user_id} />
@@ -60,8 +61,8 @@ function MemberRow({ member }: { member: MemberWithLogin }) {
             Remove
           </Button>
         </form>
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -71,20 +72,20 @@ export function MembersTable({ members }: { members: MemberWithLogin[] }) {
   }
 
   return (
-    <table className="mt-4 w-full text-left text-sm">
-      <thead>
-        <tr className="border-border border-b text-xs font-medium">
-          <th className="py-2">Member</th>
-          <th className="py-2">Role</th>
-          <th className="py-2">Source</th>
-          <th className="py-2"></th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table className="mt-4">
+      <TableHeader>
+        <TableRow>
+          <TableHead>Member</TableHead>
+          <TableHead>Role</TableHead>
+          <TableHead>Source</TableHead>
+          <TableHead></TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {members.map((m) => (
           <MemberRow key={m.user_id} member={m} />
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }

@@ -1,3 +1,4 @@
+import { Badge } from '@/shared/ui/badge';
 import type { SessionOutcome } from '../types';
 
 const LABEL: Record<SessionOutcome, string> = {
@@ -6,10 +7,14 @@ const LABEL: Record<SessionOutcome, string> = {
   blocked: 'Blocked',
 };
 
+// Badge's own variants (secondary/outline/destructive/...) don't carry
+// a semantic green/yellow/red distinction — these three outcomes
+// always have, so the original colors are kept via className rather
+// than collapsed onto a variant that would lose the distinction.
 const CLASS: Record<SessionOutcome, string> = {
-  done: 'bg-green-100 text-green-800',
-  in_progress: 'bg-yellow-100 text-yellow-800',
-  blocked: 'bg-red-100 text-red-800',
+  done: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-100',
+  in_progress: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-100',
+  blocked: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-100',
 };
 
 export function OutcomeBadge({
@@ -26,11 +31,11 @@ export function OutcomeBadge({
   if (!outcome || !(outcome in LABEL)) return null;
   const o = outcome as SessionOutcome;
   return (
-    <span
-      className={`rounded px-2 py-0.5 text-xs font-medium ${CLASS[o]}`}
+    <Badge
+      className={CLASS[o]}
       title={o === 'blocked' ? (blockedReason ?? undefined) : undefined}
     >
       {LABEL[o]}
-    </span>
+    </Badge>
   );
 }

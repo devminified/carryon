@@ -1,5 +1,6 @@
 import { formatRelativeTime } from '@/shared/lib/format/date';
 import { formatBytes } from '@/shared/lib/format/bytes';
+import { Badge } from '@/shared/ui/badge';
 import type { HeartbeatWithLogin } from '../types';
 
 const STATUS_LABEL: Record<HeartbeatWithLogin['status'], string> = {
@@ -8,10 +9,14 @@ const STATUS_LABEL: Record<HeartbeatWithLogin['status'], string> = {
   offline: 'Offline',
 };
 
+// Badge is RSC-safe (no 'use client' in its generated source) — unlike
+// Table, which is, so this Server Component keeps its plain <table>
+// (see this ticket's own "no new client boundary" testing point) but
+// still gets Badge for this one status indicator.
 const STATUS_CLASS: Record<HeartbeatWithLogin['status'], string> = {
-  online: 'bg-green-100 text-green-800',
-  stale: 'bg-yellow-100 text-yellow-800',
-  offline: 'bg-red-100 text-red-800',
+  online: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-100',
+  stale: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-100',
+  offline: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-100',
 };
 
 export function AgentsTable({ heartbeats }: { heartbeats: HeartbeatWithLogin[] }) {
@@ -62,9 +67,7 @@ export function AgentsTable({ heartbeats }: { heartbeats: HeartbeatWithLogin[] }
             <td className="py-2">{h.upload_errors}</td>
             <td className="py-2">{h.redactions_applied}</td>
             <td className="py-2">
-              <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_CLASS[h.status]}`}>
-                {STATUS_LABEL[h.status]}
-              </span>
+              <Badge className={STATUS_CLASS[h.status]}>{STATUS_LABEL[h.status]}</Badge>
             </td>
           </tr>
         ))}
