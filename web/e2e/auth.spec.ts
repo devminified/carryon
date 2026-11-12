@@ -17,6 +17,20 @@ test('unauthenticated deep link redirects to sign-in and back after login', asyn
   await expect(page.getByText(/this page could not be found/i)).toBeVisible();
 });
 
+test('an unauthenticated request to /api/health gets the real health JSON, not a login redirect', async ({
+  request,
+}) => {
+  // /api/health's own doc comment says it's deliberately unauthenticated
+  // — a monitoring probe or docker-compose's own healthcheck: can't
+  // follow a 307 to /login. Found for real: proxy.ts's PUBLIC_PATHS
+  // never listed it, so every unauthenticated check silently redirected
+  // instead of getting the JSON this endpoint promises.
+  const res = await request.get('/api/health', { maxRedirects: 0 });
+  expect(res.status()).toBe(200);
+  const body = await res.json();
+  expect(body.status).toBe('ok');
+});
+
 test("clicking 'Sign in with GitHub' starts the real Supabase OAuth redirect", async ({ page }) => {
   // CI's local Supabase has no real GitHub OAuth App client secret
   // provisioned (ci.yml's `supabase` job never set one either — this is
