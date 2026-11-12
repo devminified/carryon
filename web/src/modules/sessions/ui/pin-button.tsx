@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
+import { Pin, PinOff } from 'lucide-react';
 import { pinSessionAction } from '../data/actions';
 import { useActionToast } from '@/shared/hooks/use-action-toast';
 import { Button } from '@/shared/ui/button';
@@ -28,8 +29,6 @@ export function PinButton({
       <input type="hidden" name="sessionId" value={sessionId} />
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="pinned" value={(!pinned).toString()} />
-      {/* CO-605 swaps this emoji for a lucide Pin/PinOff icon — kept
-          as-is here since this file gets rewritten there anyway. */}
       <Button
         type="submit"
         variant="ghost"
@@ -40,7 +39,7 @@ export function PinButton({
         aria-pressed={pinned}
         className={pinned ? 'text-foreground' : 'text-muted-foreground/40 hover:text-muted-foreground'}
       >
-        📌
+        {pinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
       </Button>
     </form>
   );

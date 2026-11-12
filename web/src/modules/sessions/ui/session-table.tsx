@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Pin } from 'lucide-react';
 import { useLiveSessions } from '../hooks/use-live-sessions';
 import { LiveDot } from './live-dot';
 import { OutcomeBadge } from './outcome-badge';
@@ -9,6 +10,7 @@ import { ResummarizeButton } from './resummarize-button';
 import { formatRelativeTime } from '@/shared/lib/format/date';
 import { formatBytes } from '@/shared/lib/format/bytes';
 import { AI_ENABLED } from '@/shared/lib/ai-enabled';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/ui/table';
 import { LIVE_ACTIVITY_WINDOW_MS, type SessionListFilters, type SessionListItem } from '../types';
 
 export function SessionTable({
@@ -63,42 +65,39 @@ export function SessionTable({
   return (
     <>
       {statusMarker}
-      <table className="w-full table-auto text-left text-sm">
-        <thead>
-          <tr className="border-border text-muted-foreground border-b">
-            <th className="w-6 py-2 pr-2" aria-label="Pinned" />
-            <th className="py-2 pr-4">Session</th>
-            <th className="py-2 pr-4">Developer</th>
-            <th className="py-2 pr-4">Branch</th>
-            <th className="py-2 pr-4">Status</th>
-            <th className="py-2 pr-4">Outcome</th>
-            <th className="py-2 pr-4">Last activity</th>
-            <th className="py-2 pr-4">Size</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-6" aria-label="Pinned" />
+            <TableHead>Session</TableHead>
+            <TableHead>Developer</TableHead>
+            <TableHead>Branch</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Outcome</TableHead>
+            <TableHead>Last activity</TableHead>
+            <TableHead>Size</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {items.map((s) => {
             const live =
               s.status === 'live' &&
               now.getTime() - new Date(s.lastActivityAt).getTime() < LIVE_ACTIVITY_WINDOW_MS;
             return (
-              <tr key={s.id} className="border-border border-b">
-                <td className="py-2 pr-2">
+              <TableRow key={s.id}>
+                <TableCell>
                   {isAdmin ? (
                     <PinButton sessionId={s.id} projectId={projectId} pinned={s.pinned} />
                   ) : (
                     s.pinned && (
-                      <span
+                      <Pin
                         aria-label="Pinned session"
-                        title="Pinned session"
-                        className="text-base leading-none"
-                      >
-                        📌
-                      </span>
+                        className="text-foreground size-4 fill-current"
+                      />
                     )
                   )}
-                </td>
-                <td className="py-2 pr-4">
+                </TableCell>
+                <TableCell className="whitespace-normal">
                   <Link href={`/sessions/${s.id}`} className="text-foreground font-medium underline">
                     {s.title ?? '(untitled session)'}
                   </Link>
@@ -132,27 +131,27 @@ export function SessionTable({
                       </>
                     )}
                   </div>
-                </td>
-                <td className="text-foreground py-2 pr-4">{s.ownerLogin ?? '—'}</td>
-                <td className="text-foreground py-2 pr-4">{s.branch ?? '—'}</td>
-                <td className="py-2 pr-4">
+                </TableCell>
+                <TableCell className="text-foreground">{s.ownerLogin ?? '—'}</TableCell>
+                <TableCell className="text-foreground">{s.branch ?? '—'}</TableCell>
+                <TableCell>
                   <span className="text-foreground inline-flex items-center gap-1.5">
                     <LiveDot live={live} />
                     {s.status}
                   </span>
-                </td>
-                <td className="py-2 pr-4">
+                </TableCell>
+                <TableCell>
                   <OutcomeBadge outcome={s.outcome} blockedReason={s.blockedReason} />
-                </td>
-                <td className="text-foreground py-2 pr-4">
+                </TableCell>
+                <TableCell className="text-foreground">
                   {formatRelativeTime(s.lastActivityAt, now)}
-                </td>
-                <td className="text-foreground py-2 pr-4">{formatBytes(s.totalBytes)}</td>
-              </tr>
+                </TableCell>
+                <TableCell className="text-foreground">{formatBytes(s.totalBytes)}</TableCell>
+              </TableRow>
             );
           })}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </>
   );
 }
