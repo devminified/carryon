@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { startTransition, useActionState, useOptimistic } from 'react';
 import { Pin, PinOff } from 'lucide-react';
 import { pinSessionAction } from '../data/actions';
 import { useActionToast } from '@/shared/hooks/use-action-toast';
@@ -19,28 +19,42 @@ export function PinButton({
   pinned: boolean;
 }) {
   const [state, action, isPending] = useActionState(pinSessionAction, null);
-  // `pinned` is still the pre-toggle value when this fires (the prop
-  // only catches up once revalidatePath's refetch/Realtime lands), so
-  // !pinned is what the session just became.
-  useActionToast(state, pinned ? 'Unpinned.' : 'Pinned.');
+  // CO-607: a boolean toggle with sub-100ms expected latency — the
+  // clearest case for useOptimistic. React automatically reverts
+  // optimisticPinned back to the real `pinned` prop once the
+  // transition settles, whether the action succeeded (where it then
+  // matches the newly revalidated prop) or failed (where it snaps
+  // back to the original value the toast's error explains).
+  const [optimisticPinned, setOptimisticPinned] = useOptimistic(pinned);
+  useActionToast(state, optimisticPinned ? 'Pinned.' : 'Unpinned.');
+
+  function handleClick() {
+    const nextPinned = !optimisticPinned;
+    const formData = new FormData();
+    formData.set('sessionId', sessionId);
+    formData.set('projectId', projectId);
+    formData.set('pinned', String(nextPinned));
+    startTransition(() => {
+      setOptimisticPinned(nextPinned);
+      action(formData);
+    });
+  }
 
   return (
-    <form action={action}>
-      <input type="hidden" name="sessionId" value={sessionId} />
-      <input type="hidden" name="projectId" value={projectId} />
-      <input type="hidden" name="pinned" value={(!pinned).toString()} />
-      <Button
-        type="submit"
-        variant="ghost"
-        size="icon-sm"
-        disabled={isPending}
-        title={state?.error ?? (pinned ? 'Unpin this session' : 'Pin this session')}
-        aria-label={pinned ? 'Unpin session' : 'Pin session'}
-        aria-pressed={pinned}
-        className={pinned ? 'text-foreground' : 'text-muted-foreground/40 hover:text-muted-foreground'}
-      >
-        {pinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
-      </Button>
-    </form>
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      disabled={isPending}
+      onClick={handleClick}
+      title={state?.error ?? (optimisticPinned ? 'Unpin this session' : 'Pin this session')}
+      aria-label={optimisticPinned ? 'Unpin session' : 'Pin session'}
+      aria-pressed={optimisticPinned}
+      className={
+        optimisticPinned ? 'text-foreground' : 'text-muted-foreground/40 hover:text-muted-foreground'
+      }
+    >
+      {optimisticPinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+    </Button>
   );
 }
