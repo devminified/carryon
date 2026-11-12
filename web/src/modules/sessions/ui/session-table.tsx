@@ -107,7 +107,7 @@ export function SessionTable({
                   {/* CO-501: the passage search_sessions matched this session on —
                       only present on a semantic-search result, never the plain list. */}
                   {s.matchingPassage && (
-                    <p className="mt-1 line-clamp-2 rounded bg-yellow-100 px-1.5 py-0.5 text-xs text-yellow-900">
+                    <p className="bg-warning/10 text-warning mt-1 line-clamp-2 rounded px-1.5 py-0.5 text-xs">
                       “{s.matchingPassage}”
                     </p>
                   )}

@@ -53,7 +53,7 @@ export function RegisterProjectForm() {
         {isPending ? 'Registering…' : 'Register project'}
       </Button>
       {state?.error && <p className="text-destructive w-full text-sm">{state.error}</p>}
-      {state?.success && <p className="w-full text-sm text-green-600">Project registered.</p>}
+      {state?.success && <p className="text-success w-full text-sm">Project registered.</p>}
     </form>
   );
 }

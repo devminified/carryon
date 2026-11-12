@@ -214,7 +214,7 @@ export function ProjectSettingsForm({ project }: { project: ProjectWithSettings 
           {isPending ? 'Saving…' : 'Save settings'}
         </Button>
         {state?.error && <p className="text-destructive">{state.error}</p>}
-        {state?.success && <p className="text-green-600">Saved.</p>}
+        {state?.success && <p className="text-success">Saved.</p>}
       </div>
 
       <AlertDialog open={pendingClose !== null} onOpenChange={(open) => !open && setPendingClose(null)}>

@@ -104,7 +104,7 @@ export function RedactionConfigForm({ config }: { config: RedactionConfigRow }) 
           {isPending ? 'Saving…' : 'Save config'}
         </Button>
         {state?.error && <p className="text-destructive text-sm">{state.error}</p>}
-        {state?.success && <p className="text-sm text-green-600">Saved.</p>}
+        {state?.success && <p className="text-success text-sm">Saved.</p>}
       </div>
 
       <AlertDialog
