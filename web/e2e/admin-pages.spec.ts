@@ -256,7 +256,20 @@ test.describe.serial('admin pages (CO-410)', () => {
     // removing immediately.
     await reloadedRow.getByRole('button', { name: 'Remove' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Remove' }).click();
+    // CO-607: the row disappears optimistically now, before the real
+    // delete (and its own audit_log row) necessarily lands — the next
+    // test's own audit-log count depends on that write having really
+    // committed, so wait for the row to actually be gone server-side,
+    // not just in this tab's own optimistic UI.
     await expect(page.locator('tr').filter({ hasText: 'sara' })).toHaveCount(0);
+    await expect
+      .poll(async () => {
+        const rows = await restGet(
+          `project_members?project_id=eq.${projectId}&user_id=eq.${SARA_USER_ID}&select=user_id`,
+        );
+        return rows.length;
+      })
+      .toBe(0);
   });
 
   test('demoting an admin opens a confirming dialog; cancelling leaves the role unchanged (CO-606)', async ({

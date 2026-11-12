@@ -22,6 +22,14 @@ async function getSession(id: string): Promise<{ title: string; title_source: st
   return rows[0];
 }
 
+async function getSessionPinned(id: string): Promise<boolean> {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/sessions?id=eq.${id}&select=pinned`, {
+    headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
+  });
+  const rows = await res.json();
+  return rows[0]?.pinned;
+}
+
 test.describe.serial('rename and pin (CO-405)', () => {
   test('the owner can rename their own session, even with only viewer role on the project', async ({
     page,
@@ -107,5 +115,38 @@ test.describe.serial('rename and pin (CO-405)', () => {
     // unpin again, leaving fixture state clean for a re-run of this suite
     await targetRow.getByLabel('Unpin session').click();
     await expect(targetRow.getByLabel('Pin session', { exact: true })).toBeVisible();
+    // CO-607: the label above is now driven by an optimistic update —
+    // it flips before the real write necessarily lands. The next test
+    // navigates fresh and depends on the server already agreeing it's
+    // unpinned, so wait for that explicitly rather than trusting this
+    // tab's own (now instant) UI as a proxy for the write having
+    // committed.
+    await expect.poll(() => getSessionPinned(PIN_ADMIN_TARGET_ID)).toBe(false);
+  });
+
+  // CO-607: a tight assertion timeout (well under any real round trip
+  // to the local Supabase instance — every other test in this file
+  // takes hundreds of ms to low seconds once the real write lands) is
+  // what actually distinguishes an optimistic, client-applied update
+  // from one that merely happens to be fast. If this ever regressed
+  // to waiting for the real response first, this assertion would
+  // start timing out well before the 150ms budget below.
+  test('pinning flips the icon optimistically, before the real write could plausibly land', async ({
+    page,
+    context,
+  }) => {
+    await signInAsSeedUser(context, 'ali@devminified.com', 'password123');
+    await page.goto(`/p/${RENAME_PROJECT_B_ID}`);
+
+    const targetRow = page.locator('tbody tr').filter({ hasText: 'payment architecture decision' });
+    await targetRow.getByLabel('Pin session', { exact: true }).click();
+    await expect(targetRow.getByLabel('Unpin session')).toBeVisible({ timeout: 150 });
+
+    // leave fixture state clean for a re-run of this suite — waiting
+    // for the real write (not just this tab's own optimistic label)
+    // before the test ends, same reasoning as the previous test.
+    await targetRow.getByLabel('Unpin session').click();
+    await expect(targetRow.getByLabel('Pin session', { exact: true })).toBeVisible({ timeout: 150 });
+    await expect.poll(() => getSessionPinned(PIN_ADMIN_TARGET_ID)).toBe(false);
   });
 });

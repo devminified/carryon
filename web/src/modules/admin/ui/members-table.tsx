@@ -1,6 +1,6 @@
 'use client';
 
-import { startTransition, useActionState, useState } from 'react';
+import { startTransition, useActionState, useOptimistic, useState } from 'react';
 import { removeMemberAction, updateMemberRoleAction } from '../data/actions';
 import type { MemberWithLogin } from '../types';
 import { useActionToast } from '@/shared/hooks/use-action-toast';
@@ -32,6 +32,15 @@ function MemberRow({ member }: { member: MemberWithLogin }) {
   // confirmed submission lands and revalidation updates that prop).
   const [pendingDemoteTo, setPendingDemoteTo] = useState<string | null>(null);
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
+  // CO-607: both gated behind CO-606's own confirmation already — the
+  // admin has explicitly confirmed a demote or a removal before either
+  // of these fires, so showing the result instantly (before the round
+  // trip resolves) is honest, not presumptuous. React automatically
+  // reverts each back to its real base value (member.role / presence
+  // in the list) once the transition settles without a matching real
+  // change, i.e. on a server-side failure.
+  const [optimisticRole, setOptimisticRole] = useOptimistic(member.role);
+  const [optimisticallyRemoved, setOptimisticallyRemoved] = useOptimistic(false);
 
   // Dispatched directly (not via a real <form action={roleAction}>
   // submission) — confirmed for real that React 19 calls the native
@@ -44,6 +53,7 @@ function MemberRow({ member }: { member: MemberWithLogin }) {
   // either mechanism to react to.
   function submitRoleChange(role: string) {
     startTransition(() => {
+      setOptimisticRole(role as typeof member.role);
       roleAction(buildFormData({ projectId: member.project_id, userId: member.user_id, role }));
     });
   }
@@ -58,17 +68,20 @@ function MemberRow({ member }: { member: MemberWithLogin }) {
 
   function submitRemove() {
     startTransition(() => {
+      setOptimisticallyRemoved(true);
       removeAction(buildFormData({ projectId: member.project_id, userId: member.user_id }));
     });
   }
 
   const name = member.login ?? member.email ?? member.user_id;
 
+  if (optimisticallyRemoved) return null;
+
   return (
     <TableRow>
       <TableCell>{name}</TableCell>
       <TableCell>
-        <Select value={member.role} disabled={roleIsPending} onValueChange={onRoleChange}>
+        <Select value={optimisticRole} disabled={roleIsPending} onValueChange={onRoleChange}>
           <SelectTrigger size="sm">
             <SelectValue />
           </SelectTrigger>
