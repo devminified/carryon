@@ -1,6 +1,6 @@
 'use client';
 
-import { startTransition, useActionState } from 'react';
+import { startTransition, useActionState, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -8,6 +8,16 @@ import { updateRedactionConfigAction } from '../data/actions';
 import type { RedactionConfigRow } from '../types';
 import { useActionToast } from '@/shared/hooks/use-action-toast';
 import { buildFormData } from '@/shared/lib/form-data';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/shared/ui/alert-dialog';
 import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
 import { Label } from '@/shared/ui/label';
@@ -43,8 +53,22 @@ export function RedactionConfigForm({ config }: { config: RedactionConfigRow }) 
     },
   });
 
-  function onValid(data: RedactionConfigFormValues) {
+  // CO-606: only a genuine change to the pinned version gets a
+  // confirming step — editing the other fields, or submitting with
+  // pinnedVersion unchanged, saves immediately as before.
+  const [pendingPinChange, setPendingPinChange] = useState<RedactionConfigFormValues | null>(null);
+  const currentPinnedVersion = config.pinned_version ?? '';
+
+  function submit(data: RedactionConfigFormValues) {
     startTransition(() => action(buildFormData(data)));
+  }
+
+  function onValid(data: RedactionConfigFormValues) {
+    if (data.pinnedVersion !== currentPinnedVersion) {
+      setPendingPinChange(data);
+      return;
+    }
+    submit(data);
   }
 
   return (
@@ -82,6 +106,34 @@ export function RedactionConfigForm({ config }: { config: RedactionConfigRow }) 
         {state?.error && <p className="text-destructive text-sm">{state.error}</p>}
         {state?.success && <p className="text-sm text-green-600">Saved.</p>}
       </div>
+
+      <AlertDialog
+        open={pendingPinChange !== null}
+        onOpenChange={(open) => !open && setPendingPinChange(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Change the fleet&apos;s pinned agent version?</AlertDialogTitle>
+            <AlertDialogDescription>
+              From <strong>{currentPinnedVersion || 'no pin'}</strong> to{' '}
+              <strong>{pendingPinChange?.pinnedVersion || 'no pin'}</strong> — this changes the
+              compatibility ceiling for every developer&apos;s laptop the next time it checks for an
+              update.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingPinChange) submit(pendingPinChange);
+                setPendingPinChange(null);
+              }}
+            >
+              Change pinned version
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </form>
   );
 }

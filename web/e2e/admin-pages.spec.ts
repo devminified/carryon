@@ -252,8 +252,33 @@ test.describe.serial('admin pages (CO-410)', () => {
     const reloadedRow = page.locator('tr').filter({ hasText: 'sara' });
     await expect(reloadedRow.getByRole('combobox')).toContainText('resumer');
 
+    // CO-606: Remove now opens a confirming dialog rather than
+    // removing immediately.
     await reloadedRow.getByRole('button', { name: 'Remove' }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Remove' }).click();
     await expect(page.locator('tr').filter({ hasText: 'sara' })).toHaveCount(0);
+  });
+
+  test('demoting an admin opens a confirming dialog; cancelling leaves the role unchanged (CO-606)', async ({
+    page,
+    context,
+  }) => {
+    await signInAsSeedUser(context, 'ali@devminified.com', 'password123');
+    const projectId = await findProjectId(NEW_PROJECT_NAME);
+
+    await page.goto(`/admin/members?project=${projectId}`);
+    const row = page.locator('tr').filter({ hasText: 'ali' });
+    await row.getByRole('combobox').click();
+    await page.getByRole('option', { name: 'viewer', exact: true }).click();
+
+    await expect(page.getByRole('alertdialog')).toContainText("Remove ali's admin access?");
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
+
+    const roleRows = await restGet(
+      `project_members?project_id=eq.${projectId}&user_id=eq.11111111-1111-1111-1111-111111111111&select=role`,
+    );
+    expect(roleRows[0].role).toBe('admin');
+    await expect(row.getByRole('combobox')).toContainText('admin');
   });
 
   test('the audit log shows real rows for the actions above, and CSV export matches the filtered view', async ({
@@ -423,6 +448,9 @@ test.describe.serial('admin pages (CO-410)', () => {
     await page.getByLabel(/Extra path denylist globs/).fill('**/co410-e2e-secrets/**');
     await page.getByLabel(/Pinned agent version/).fill('1.4.0');
     await page.getByRole('button', { name: 'Save config' }).click();
+    // CO-606: a genuine pinnedVersion change is gated behind a
+    // confirmation dialog — confirming it is what actually submits.
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Change pinned version' }).click();
     // CO-603: same toast-vs-inline-text overlap as the registration
     // test above — .first() targets the persistent inline message.
     await expect(page.getByText('Saved.').first()).toBeVisible();
@@ -452,6 +480,7 @@ test.describe.serial('admin pages (CO-410)', () => {
 
     await page.getByLabel(/Pinned agent version/).fill('9.9.9-no-compat-run');
     await page.getByRole('button', { name: 'Save config' }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Change pinned version' }).click();
 
     await expect(page.getByText(/no green Claude Code compatibility run/).first()).toBeVisible();
 

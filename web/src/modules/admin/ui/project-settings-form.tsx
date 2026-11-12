@@ -1,6 +1,6 @@
 'use client';
 
-import { startTransition, useActionState } from 'react';
+import { startTransition, useActionState, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { z } from 'zod';
@@ -9,6 +9,16 @@ import { updateProjectSettingsSchema } from '../schemas';
 import type { ProjectWithSettings } from '../types';
 import { useActionToast } from '@/shared/hooks/use-action-toast';
 import { buildFormData } from '@/shared/lib/form-data';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/shared/ui/alert-dialog';
 import { Button } from '@/shared/ui/button';
 import { Checkbox } from '@/shared/ui/checkbox';
 import { Input } from '@/shared/ui/input';
@@ -59,8 +69,21 @@ export function ProjectSettingsForm({ project }: { project: ProjectWithSettings 
     },
   });
 
-  function onValid(data: FormOutput) {
+  // CO-606: only newly checking "Closed" (the project wasn't already
+  // closed) gets a confirming step — unchecking it, or submitting with
+  // it already checked and unchanged, saves immediately as before.
+  const [pendingClose, setPendingClose] = useState<FormOutput | null>(null);
+
+  function submit(data: FormOutput) {
     startTransition(() => action(buildFormData(data)));
+  }
+
+  function onValid(data: FormOutput) {
+    if (data.closed && project.closed_at === null) {
+      setPendingClose(data);
+      return;
+    }
+    submit(data);
   }
 
   return (
@@ -193,6 +216,30 @@ export function ProjectSettingsForm({ project }: { project: ProjectWithSettings 
         {state?.error && <p className="text-destructive">{state.error}</p>}
         {state?.success && <p className="text-green-600">Saved.</p>}
       </div>
+
+      <AlertDialog open={pendingClose !== null} onOpenChange={(open) => !open && setPendingClose(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Close this project?</AlertDialogTitle>
+            <AlertDialogDescription>
+              New sessions can no longer be captured for {project.name}. Existing sessions stay
+              readable until the retention window after close elapses, per this project&apos;s own
+              retention setting.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingClose) submit(pendingClose);
+                setPendingClose(null);
+              }}
+            >
+              Close project
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </form>
   );
 }
