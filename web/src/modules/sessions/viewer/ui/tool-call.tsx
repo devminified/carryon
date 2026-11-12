@@ -40,7 +40,7 @@ export function ToolCall({
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>
         <span className="font-mono">{summary}</span>
         {result?.isError && (
-          <span className="rounded bg-red-100 px-1.5 text-xs text-red-800 dark:bg-red-900/40 dark:text-red-100">
+          <span className="bg-destructive/10 text-destructive dark:bg-destructive/20 rounded px-1.5 text-xs">
             error
           </span>
         )}

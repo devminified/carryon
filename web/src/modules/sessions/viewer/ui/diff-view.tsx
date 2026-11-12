@@ -7,9 +7,9 @@ export function DiffView({ oldText, newText }: { oldText: string; newText: strin
       {parts.map((part, i) => {
         const prefix = part.added ? '+' : part.removed ? '-' : ' ';
         const cls = part.added
-          ? 'bg-green-100 text-green-900 dark:bg-green-900/40 dark:text-green-100'
+          ? 'bg-success/10 text-success dark:bg-success/20'
           : part.removed
-            ? 'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-100'
+            ? 'bg-destructive/10 text-destructive dark:bg-destructive/20'
             : 'text-muted-foreground';
         return part.value
           .split('\n')

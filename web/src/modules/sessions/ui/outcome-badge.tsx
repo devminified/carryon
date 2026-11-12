@@ -12,9 +12,9 @@ const LABEL: Record<SessionOutcome, string> = {
 // always have, so the original colors are kept via className rather
 // than collapsed onto a variant that would lose the distinction.
 const CLASS: Record<SessionOutcome, string> = {
-  done: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-100',
-  in_progress: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-100',
-  blocked: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-100',
+  done: 'bg-success/10 text-success dark:bg-success/20',
+  in_progress: 'bg-warning/10 text-warning dark:bg-warning/20',
+  blocked: 'bg-destructive/10 text-destructive dark:bg-destructive/20',
 };
 
 export function OutcomeBadge({

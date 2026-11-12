@@ -14,9 +14,9 @@ const STATUS_LABEL: Record<HeartbeatWithLogin['status'], string> = {
 // (see this ticket's own "no new client boundary" testing point) but
 // still gets Badge for this one status indicator.
 const STATUS_CLASS: Record<HeartbeatWithLogin['status'], string> = {
-  online: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-100',
-  stale: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-100',
-  offline: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-100',
+  online: 'bg-success/10 text-success dark:bg-success/20',
+  stale: 'bg-warning/10 text-warning dark:bg-warning/20',
+  offline: 'bg-destructive/10 text-destructive dark:bg-destructive/20',
 };
 
 export function AgentsTable({ heartbeats }: { heartbeats: HeartbeatWithLogin[] }) {

@@ -16,7 +16,7 @@ export function HighlightedText({ text }: { text: string }) {
         <Fragment key={i}>
           {part}
           {i < matches.length && (
-            <mark className="rounded bg-yellow-200 px-1 text-yellow-900 dark:bg-yellow-900 dark:text-yellow-100">
+            <mark className="bg-warning/15 text-warning dark:bg-warning/25 rounded px-1">
               {matches[i]}
             </mark>
           )}

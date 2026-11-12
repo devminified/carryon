@@ -3,54 +3,69 @@
 @import 'shadcn/tailwind.css';
 @plugin '@tailwindcss/typography';
 
-/* CO-602: shadcn/ui's real token set, replacing the previous 5-token
-   block (which left --primary, --card, --secondary, --accent, --ring,
-   etc. all undefined — the direct cause of 5 files' bg-primary/
-   text-primary-foreground rendering with no visible background). Kept
-   on prefers-color-scheme, not a .dark class toggle — this phase adds
-   no manual light/dark switch (see CO-609). */
+/* CO-701: real values from Linear (near-black #08090A, brand violet
+   #5E6AD2) and GitHub Primer (light-mode neutrals, the real green/
+   amber/red status colors, and the real blue reserved for --live) —
+   not an invented or approximated palette. Replaces CO-602's
+   placeholder zero-chroma grayscale (oklch(... 0 0) everywhere, which
+   is why --primary/--accent never read as "branded"). Kept on
+   prefers-color-scheme, not a .dark class toggle — still no manual
+   light/dark switch (see CO-609).
+
+   --success/--warning/--live are new tokens, not part of shadcn's
+   base set — added the same way --destructive already is, each wired
+   into @theme inline below so bg-success/text-warning/etc. work as
+   real Tailwind utilities. No "-foreground" pairing for any of the
+   three: every current use is a tinted background + colored text
+   badge, never a solid fill needing a contrasting foreground. */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --background: #ffffff;
+  --foreground: #1f2328;
+  --card: #ffffff;
+  --card-foreground: #1f2328;
+  --popover: #ffffff;
+  --popover-foreground: #1f2328;
+  --primary: #5e6ad2;
+  --primary-foreground: #ffffff;
+  --secondary: #f6f8fa;
+  --secondary-foreground: #1f2328;
+  --muted: #f6f8fa;
+  --muted-foreground: #656d76;
+  --accent: #f6f8fa;
+  --accent-foreground: #1f2328;
+  --destructive: #cf222e;
+  --success: #1a7f37;
+  --warning: #9a6700;
+  --live: #0969da;
+  --border: #d0d7de;
+  --input: #d0d7de;
+  --ring: #5e6ad2;
   --radius: 0.625rem;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
+    --background: #08090a;
+    --foreground: #f7f8f8;
+    --card: #0d0e10;
+    --card-foreground: #f7f8f8;
+    --popover: #0d0e10;
+    --popover-foreground: #f7f8f8;
+    --primary: #6e79d6;
+    --primary-foreground: #f7f8f8;
+    --secondary: #141516;
+    --secondary-foreground: #f7f8f8;
+    --muted: #141516;
+    --muted-foreground: #8a8f98;
+    --accent: #141516;
+    --accent-foreground: #f7f8f8;
+    --destructive: #f85149;
+    --success: #3fb950;
+    --warning: #d29922;
+    --live: #58a6ff;
+    --border: #1f2023;
+    --input: #1f2023;
+    --ring: #6e79d6;
   }
 }
 
@@ -70,6 +85,9 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-live: var(--live);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
