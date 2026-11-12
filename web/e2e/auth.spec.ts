@@ -31,6 +31,35 @@ test('an unauthenticated request to /api/health gets the real health JSON, not a
   expect(body.status).toBe('ok');
 });
 
+test('/login renders dynamically, so its CSP nonce header always matches its own inline scripts', async ({
+  request,
+}) => {
+  // Found for real on Vercel, not reproducible against a bare `next
+  // start` (no CDN in front of it): /login has no per-request data
+  // dependency, so Next statically prerendered it — one fixed HTML
+  // response, with no nonce on its own inline hydration bootstrap
+  // script, served from the CDN cache to every visitor. proxy.ts's own
+  // CSP header still carries a fresh random nonce on every request, so
+  // the two could never match — the browser silently blocked the
+  // page's own bootstrap script and it never hydrated past the
+  // Suspense fallback (login/page.tsx's `fallback={null}` is exactly
+  // why that looked like a blank page with no sign-in button at all).
+  // `export const dynamic = 'force-dynamic'` on that page is the fix —
+  // this test re-fetches twice and checks the nonce genuinely changes
+  // request to request (ruling out a cached body) while always
+  // matching its own response's inline scripts.
+  const res1 = await request.get('/login');
+  const body1 = await res1.text();
+  const nonce1 = res1.headers()['content-security-policy']?.match(/nonce-([A-Za-z0-9+/=]+)/)?.[1];
+  expect(nonce1).toBeTruthy();
+  expect(body1).toContain(nonce1);
+
+  const res2 = await request.get('/login');
+  const nonce2 = res2.headers()['content-security-policy']?.match(/nonce-([A-Za-z0-9+/=]+)/)?.[1];
+  expect(nonce2).toBeTruthy();
+  expect(nonce2).not.toBe(nonce1);
+});
+
 test("clicking 'Sign in with GitHub' starts the real Supabase OAuth redirect", async ({ page }) => {
   // CI's local Supabase has no real GitHub OAuth App client secret
   // provisioned (ci.yml's `supabase` job never set one either — this is
