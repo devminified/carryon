@@ -6,9 +6,8 @@ import { formatRelativeTime } from '@/shared/lib/format/date';
 import { useLiveNow } from '@/shared/hooks/use-live-now';
 import { Button } from '@/shared/ui/button';
 import { OutcomeBadge } from '../../ui/outcome-badge';
-import { FamilyTree } from './family-tree';
 import { RenameControl } from './rename-control';
-import type { FamilyNode, SessionTranscriptMeta } from '../types';
+import type { SessionTranscriptMeta } from '../types';
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -21,14 +20,17 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 export function SidePanel({
   session,
-  familyNodes,
-  danglingParentId,
+  familyTree,
   canRename,
   now: initialNow,
 }: {
   session: SessionTranscriptMeta;
-  familyNodes: FamilyNode[];
-  danglingParentId: string | null;
+  // CO-608: a Server Component (family-tree-section.tsx), already
+  // wrapped in its own <Suspense> by the page — passed down as an
+  // already-composed slot rather than raw familyNodes/danglingParentId
+  // props, so its own get-session-family fetch can stream in
+  // independently of this (client) component's own render.
+  familyTree: React.ReactNode;
   // CO-405: the owner or a project admin — see the page's own
   // canRename computation. RLS is still the real enforcement for the
   // rename itself.
@@ -101,7 +103,7 @@ export function SidePanel({
         </div>
       )}
 
-      <FamilyTree nodes={familyNodes} danglingParentId={danglingParentId} now={now} />
+      {familyTree}
 
       <div>
         <p className="text-muted-foreground mb-1 text-xs">Resume this session</p>
