@@ -8,7 +8,11 @@ import { NextResponse, type NextRequest } from 'next/server';
 // Server Component's requireUser() backs up, not the other way around:
 // Proxy isn't a full session/authorization solution on its own (Next's
 // own proxy guide), so requireUser()/requireRole() still run server-side.
-const PUBLIC_PATHS = ['/login', '/auth/callback'];
+// /api/health is deliberately unauthenticated — see that route's own
+// doc comment (CO-506): a monitoring probe or docker-compose's own
+// `healthcheck:` can't follow a login redirect, so it has to be public
+// here too, not just in the route handler itself.
+const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/health'];
 
 export async function proxy(request: NextRequest) {
   // CO-507: a fresh nonce every request, carried on the REQUEST's own
