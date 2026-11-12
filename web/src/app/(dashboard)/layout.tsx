@@ -3,6 +3,7 @@ import { isGlobalAdmin, requireUser } from '@/shared/lib/auth';
 import { listProjectsForCurrentUser } from '@/modules/projects/data/queries';
 import { ProjectSwitcher } from '@/modules/projects/ui/project-switcher';
 import { UserMenu } from '@/modules/auth/ui/user-menu';
+import { Wordmark } from '@/shared/ui/logo';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -12,8 +13,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="flex min-h-screen flex-col">
       <header className="border-border flex items-center justify-between border-b px-6 py-3">
         <div className="flex items-center gap-4">
-          <Link href="/" className="text-foreground font-semibold">
-            Carryon
+          <Link href="/" className="text-foreground">
+            <Wordmark />
           </Link>
           <ProjectSwitcher projects={projects} />
           {/* CO-410: hidden for everyone but a global admin — a UI
