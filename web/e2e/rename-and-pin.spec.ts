@@ -87,8 +87,9 @@ test.describe.serial('rename and pin (CO-405)', () => {
     await expect(page.getByLabel('Pin session', { exact: true })).toHaveCount(0);
 
     // pinned-first: the pre-pinned (older) session still sorts above
-    // the newer unpinned one.
-    const firstTitleCell = page.locator('tbody tr td:nth-child(2) a').first();
+    // the newer unpinned one. The session title is the only link
+    // inside any row — no column index needed (CO-704).
+    const firstTitleCell = page.locator('tbody tr a').first();
     await expect(firstTitleCell).toHaveText('pre-pinned session');
   });
 
@@ -100,16 +101,12 @@ test.describe.serial('rename and pin (CO-405)', () => {
     await page.goto(`/p/${RENAME_PROJECT_B_ID}`);
 
     // Before pinning: the newer session (ali's own) sorts first.
-    await expect(page.locator('tbody tr td:nth-child(2) a').first()).toHaveText(
-      'newer unrelated session',
-    );
+    await expect(page.locator('tbody tr a').first()).toHaveText('newer unrelated session');
 
     const targetRow = page.locator('tbody tr').filter({ hasText: 'payment architecture decision' });
     await targetRow.getByLabel('Pin session', { exact: true }).click();
 
-    await expect(page.locator('tbody tr td:nth-child(2) a').first()).toHaveText(
-      'payment architecture decision',
-    );
+    await expect(page.locator('tbody tr a').first()).toHaveText('payment architecture decision');
     await expect(targetRow.getByLabel('Unpin session')).toBeVisible();
 
     // unpin again, leaving fixture state clean for a re-run of this suite

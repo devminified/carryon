@@ -1,5 +1,17 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { signInAsSeedUser } from './auth-helpers';
+
+// CO-704: session-table.tsx moved onto a real TanStack DataTable —
+// looking up a column by its real header text (once, at test time)
+// instead of a hardcoded td:nth-child index means a future column
+// reorder changes nothing here, rather than silently reading the
+// wrong column with no failure at all.
+async function columnIndex(page: Page, label: string): Promise<number> {
+  const headers = await page.locator('thead th').allTextContents();
+  const idx = headers.findIndex((h) => h.trim() === label);
+  if (idx === -1) throw new Error(`no "${label}" column header found`);
+  return idx;
+}
 
 // Seeded directly against local Supabase before this suite runs — see
 // e2e/seed.sql (CO-402's own real-verification fixture): project
@@ -38,13 +50,12 @@ test.describe.serial('session list (CO-402)', () => {
 
     await page.getByRole('combobox', { name: 'Filter by branch' }).selectOption('main');
     await expect(page).toHaveURL(/branch=main/);
-    // CO-405 added a leading pin-icon column — Session/Developer/Branch
-    // are now columns 2/3/4, not 1/2/3.
-    const branchCells = page.locator('tbody tr td:nth-child(4)');
-    await expect(branchCells.first()).toHaveText('main');
-    const count = await branchCells.count();
+    const branchCol = await columnIndex(page, 'Branch');
+    const rows = page.locator('tbody tr');
+    const count = await rows.count();
+    expect(count).toBeGreaterThan(0);
     for (let i = 0; i < count; i++) {
-      await expect(branchCells.nth(i)).toHaveText('main');
+      await expect(rows.nth(i).locator('td').nth(branchCol)).toHaveText('main');
     }
   });
 
@@ -52,10 +63,12 @@ test.describe.serial('session list (CO-402)', () => {
     await signInAsSeedUser(context, 'ali@devminified.com', 'password123');
     await page.goto(`/p/${PERF_PROJECT_ID}`);
 
-    const firstPageTitles = await page.locator('tbody tr td:nth-child(2) a').allTextContents();
+    // The session title is the only link inside any row — no column
+    // index needed, this is unambiguous regardless of column order.
+    const firstPageTitles = await page.locator('tbody tr a').allTextContents();
     await page.getByRole('link', { name: 'Load more' }).click();
     await expect(page).toHaveURL(/cursor=/);
-    const secondPageTitles = await page.locator('tbody tr td:nth-child(2) a').allTextContents();
+    const secondPageTitles = await page.locator('tbody tr a').allTextContents();
 
     expect(firstPageTitles.length).toBeGreaterThan(0);
     expect(secondPageTitles.length).toBeGreaterThan(0);
@@ -116,8 +129,8 @@ test.describe.serial('session list (CO-402)', () => {
     );
 
     const row = page.locator('tbody tr').filter({ hasText: 'realtime test fixture session' });
-    // CO-405's leading pin column shifts "Last activity" from 6 to 7.
-    const before = await row.locator('td:nth-child(7)').textContent();
+    const lastActivityCol = await columnIndex(page, 'Last activity');
+    const before = await row.locator('td').nth(lastActivityCol).textContent();
 
     // Real confirm-chunk-style activity bump, via the real PostgREST API —
     // not a UI action, so this proves the Realtime wire-up, not a refetch
@@ -135,12 +148,12 @@ test.describe.serial('session list (CO-402)', () => {
     expect(patchRes.ok).toBe(true);
 
     await expect(async () => {
-      const after = await row.locator('td:nth-child(7)').textContent();
+      const after = await row.locator('td').nth(lastActivityCol).textContent();
       expect(after).not.toBe(before);
     }).toPass({ timeout: 5000 });
 
     // same row, not a reload-and-happen-to-match — title still present
-    await expect(row.locator('td:nth-child(2) a')).toHaveText('realtime test fixture session');
+    await expect(row.locator('a')).toHaveText('realtime test fixture session');
 
     await fetch(`${SUPABASE_URL}/rest/v1/sessions?id=eq.${sessionId}`, {
       method: 'DELETE',
