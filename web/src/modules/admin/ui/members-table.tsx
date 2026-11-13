@@ -1,6 +1,7 @@
 'use client';
 
-import { startTransition, useActionState, useOptimistic, useState } from 'react';
+import { startTransition, useActionState, useMemo, useOptimistic, useState } from 'react';
+import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
 import { removeMemberAction, updateMemberRoleAction } from '../data/actions';
 import type { MemberWithLogin } from '../types';
 import { useActionToast } from '@/shared/hooks/use-action-toast';
@@ -18,6 +19,22 @@ import {
 import { Button } from '@/shared/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/ui/table';
+
+// CO-705: a member's role/remove state (useActionState + useOptimistic
+// for both, two AlertDialogs) needs the whole row — a removed member
+// disappears entirely, a role change affects more than one cell — so
+// MemberRow stays a row-level component rather than decomposing into
+// per-column cell renderers. useReactTable is only here to drive real
+// header cells and a stable per-row id (same getRowId lesson CO-704
+// learned the hard way); the body still renders through MemberRow
+// directly rather than the shared <DataTable>, whose flexRender-per-
+// cell body shape doesn't fit a row this interdependent.
+const MEMBER_COLUMNS: ColumnDef<MemberWithLogin>[] = [
+  { id: 'member', header: 'Member' },
+  { id: 'role', header: 'Role' },
+  { id: 'source', header: 'Source' },
+  { id: 'actions', header: '' },
+];
 
 function MemberRow({ member }: { member: MemberWithLogin }) {
   const [roleState, roleAction, roleIsPending] = useActionState(updateMemberRoleAction, null);
@@ -156,6 +173,14 @@ function MemberRow({ member }: { member: MemberWithLogin }) {
 }
 
 export function MembersTable({ members }: { members: MemberWithLogin[] }) {
+  const table = useReactTable({
+    data: members,
+    columns: MEMBER_COLUMNS,
+    getCoreRowModel: getCoreRowModel(),
+    getRowId: (m) => m.user_id,
+  });
+  const headerGroups = useMemo(() => table.getHeaderGroups(), [table]);
+
   if (members.length === 0) {
     return <p className="text-muted-foreground mt-4 text-sm">No members on this project yet.</p>;
   }
@@ -163,16 +188,21 @@ export function MembersTable({ members }: { members: MemberWithLogin[] }) {
   return (
     <Table className="mt-4">
       <TableHeader>
-        <TableRow>
-          <TableHead>Member</TableHead>
-          <TableHead>Role</TableHead>
-          <TableHead>Source</TableHead>
-          <TableHead></TableHead>
-        </TableRow>
+        {headerGroups.map((headerGroup) => (
+          <TableRow key={headerGroup.id}>
+            {headerGroup.headers.map((header) => (
+              <TableHead key={header.id}>
+                {header.isPlaceholder
+                  ? null
+                  : flexRender(header.column.columnDef.header, header.getContext())}
+              </TableHead>
+            ))}
+          </TableRow>
+        ))}
       </TableHeader>
       <TableBody>
-        {members.map((m) => (
-          <MemberRow key={m.user_id} member={m} />
+        {table.getRowModel().rows.map((row) => (
+          <MemberRow key={row.id} member={row.original} />
         ))}
       </TableBody>
     </Table>
