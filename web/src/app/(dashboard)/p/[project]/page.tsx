@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getProjectForCurrentUser } from '@/modules/projects/data/queries';
+import { getProjectForCurrentUser, listProjectsForCurrentUser } from '@/modules/projects/data/queries';
+import { ProjectSwitcher } from '@/modules/projects/ui/project-switcher';
 import {
   findSessionsByFile,
   listBranchesForProject,
@@ -64,7 +65,7 @@ export default async function ProjectPage({
   // function's own comment), instead of the plain, cursor-paginated
   // project list. session-filters.tsx keeps q/file mutually exclusive
   // in the URL, so at most one of these ever applies.
-  const [{ items, nextCursor }, developers, branches, role] = await Promise.all([
+  const [{ items, nextCursor }, developers, branches, role, projects] = await Promise.all([
     filters.q
       ? searchSessionsForProject(projectId, { ...filters, q: filters.q }).then((items) => ({
           items,
@@ -79,6 +80,7 @@ export default async function ProjectPage({
     listDevelopersForProject(projectId),
     listBranchesForProject(projectId),
     getCurrentRole(projectId),
+    listProjectsForCurrentUser(),
   ]);
   const isAdmin = role === 'admin';
 
@@ -97,7 +99,7 @@ export default async function ProjectPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-foreground text-lg font-semibold">{project.name}</h1>
+      <ProjectSwitcher projects={projects} />
       <SessionFilters developers={developers} branches={branches} />
       <SessionTable
         projectId={projectId}
